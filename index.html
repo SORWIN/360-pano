@@ -27,6 +27,7 @@
 <script>
 (() => {
   const cnv = document.getElementById('gl');
+  cnv.style.touchAction = 'none';
   const gl = cnv.getContext('webgl', { antialias:false, alpha:false });
   const note = document.getElementById('note');
   const say = s => note.textContent = s;
@@ -114,7 +115,15 @@
   let yaw=0,pitch=0,roll=0,fov=Math.PI/3;
   let gyroOn=false, orientHandler=null, prevA=null, yawVel=0;
   const LPF=0.25, HORIZ_SOFT=0.3;
+  const PITCH_LIM=Math.PI/2-0.001;
+  const MIN_FOV=Math.PI/8, MAX_FOV=Math.PI*0.95;
+  const ROT_SPEED=0.0025;
+  const activePointers=new Map();
+  let pinchStartDist=null, pinchStartFov=null;
   const gyroBtn=document.getElementById('gyroBtn');
+  function clampPitch(v){ return Math.max(-PITCH_LIM, Math.min(PITCH_LIM, v)); }
+  function clampFov(v){ return Math.max(MIN_FOV, Math.min(MAX_FOV, v)); }
+  function manualControl(){ if(gyroOn) disableGyro(); }
 
   // ориентация экрана для корректного roll в портрете/ландшафте
   let scrAng = (screen.orientation && screen.orientation.angle) || window.orientation || 0;
@@ -138,8 +147,7 @@
     yaw+=yawVel;
 
     // ПОЛНЫЙ НАКЛОН ВПЕРЕД/НАЗАД: возвращаем pitch из β
-    const lim = Math.PI/2 - 0.001;
-    pitch = Math.max(-lim, Math.min(lim, b - Math.PI/2));
+    pitch = clampPitch(b - Math.PI/2);
 
     // НАКЛОН ВЛЕВО/ВПРАВО: roll из γ с учётом ориентации экрана
     const ang = ((scrAng%360)+360)%360;
@@ -162,12 +170,79 @@
 
   function disableGyro(){
     if(orientHandler) window.removeEventListener('deviceorientation',orientHandler,true);
-    orientHandler=null; gyroOn=false;
+    orientHandler=null; gyroOn=false; prevA=null; yawVel=0;
     gyroBtn.textContent='Гироскоп: выкл';
   }
 
   gyroBtn.addEventListener('click',()=> gyroOn ? disableGyro():enableGyro());
   enableGyro(); // автозапуск
+
+  // --- Pointer / Touch controls
+  function getPinchDistance(){
+    const pts=[...activePointers.values()];
+    if(pts.length<2) return 0;
+    const [a,b]=pts;
+    return Math.hypot(a.x-b.x, a.y-b.y);
+  }
+
+  function resetPinch(){ pinchStartDist=null; pinchStartFov=null; }
+
+  cnv.addEventListener('pointerdown', ev=>{
+    ev.preventDefault();
+    manualControl();
+    cnv.setPointerCapture(ev.pointerId);
+    activePointers.set(ev.pointerId,{x:ev.clientX,y:ev.clientY});
+    if(activePointers.size>=2){
+      pinchStartDist=getPinchDistance();
+      pinchStartFov=fov;
+    }else{
+      resetPinch();
+    }
+  });
+
+  cnv.addEventListener('pointermove', ev=>{
+    if(!activePointers.has(ev.pointerId)) return;
+    ev.preventDefault();
+    const pt=activePointers.get(ev.pointerId);
+    const dx=ev.clientX-pt.x;
+    const dy=ev.clientY-pt.y;
+    pt.x=ev.clientX; pt.y=ev.clientY;
+    if(activePointers.size===1){
+      yaw-=dx*ROT_SPEED;
+      pitch=clampPitch(pitch-dy*ROT_SPEED);
+    }else if(activePointers.size>=2){
+      if(pinchStartDist===null){
+        pinchStartDist=getPinchDistance();
+        pinchStartFov=fov;
+      }else{
+        const dist=getPinchDistance();
+        if(dist>0){
+          const scale=pinchStartDist/dist;
+          fov=clampFov(pinchStartFov*scale);
+        }
+      }
+    }
+  });
+
+  function endPointer(ev){
+    if(activePointers.has(ev.pointerId)){
+      activePointers.delete(ev.pointerId);
+      if(activePointers.size<2) resetPinch();
+    }
+    if(cnv.hasPointerCapture && cnv.hasPointerCapture(ev.pointerId)){
+      cnv.releasePointerCapture(ev.pointerId);
+    }
+  }
+
+  cnv.addEventListener('pointerup', endPointer);
+  cnv.addEventListener('pointercancel', endPointer);
+
+  cnv.addEventListener('wheel', ev=>{
+    ev.preventDefault();
+    manualControl();
+    const scale=Math.exp(ev.deltaY*0.001);
+    fov=clampFov(fov*scale);
+  },{passive:false});
 
   // --- Resize + Render
   function resize(){
