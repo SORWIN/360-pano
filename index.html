@@ -4,12 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>360 Панорама — офлайн</title>
-<link rel="icon" href="data:,">
 <style>
   html,body{margin:0;height:100%;background:#000;color:#ddd;font-family:system-ui}
   #ui{position:fixed;left:12px;top:12px;display:flex;gap:8px;z-index:10;flex-wrap:wrap}
-  #ui>*{background:#111a;border:1px solid #333;border-radius:10px;padding:6px 10px;font-size:14px}
-  #note{position:fixed;left:12px;bottom:12px;background:#111a;border:1px solid #333;border-radius:10px;padding:8px 10px;z-index:10;max-width:min(92vw,860px)}
+  #ui>*{background:#111a;border:1px solid #333;border-radius:10px;padding:8px 10px;font-size:14px;color:#eee}
+  #notice{position:fixed;left:12px;bottom:12px;background:#111a;border:1px solid #333;border-radius:10px;padding:8px 10px;z-index:10;max-width:min(92vw,720px);line-height:1.35}
   canvas{display:block;width:100vw;height:100vh}
   button{cursor:pointer}
 </style>
@@ -17,50 +16,46 @@
 <body>
 <div id="ui">
   <input id="picker" type="file" accept="image/jpeg,image/png,image/webp">
-  <button id="gyroBtn">Гироскоп: выкл</button>
+  <button id="gyroBtn" title="Вкл/выкл гироскоп">Гироскоп: выкл</button>
   <button id="centerBtn">Центр</button>
   <button id="fsBtn">Fullscreen</button>
 </div>
-<div id="note">Ищу <code>panorama_4096x2048.jpg</code> рядом с этим файлом… ЛКМ/тач — вращение, колесо/пинч — зум.</div>
+<div id="notice">Загружаю <code>panorama_4096x2048.jpg</code>. Управление: ЛКМ — вращение, колесо — FOV. На телефоне можно включить гироскоп.</div>
 <canvas id="gl"></canvas>
 
 <script>
 (() => {
   const cnv = document.getElementById('gl');
-  const gl = cnv.getContext('webgl', { antialias:false, alpha:false });
-  const note = document.getElementById('note');
-  const say = s => note.textContent = s;
-  if (!gl) { say('WebGL недоступен.'); return; }
+  const gl = cnv.getContext('webgl', { antialias:false, alpha:false, preserveDrawingBuffer:false });
+  const notice = document.getElementById('notice');
+  const gyroBtn = document.getElementById('gyroBtn');
+  if (!gl) { notice.textContent = 'WebGL недоступен.'; return; }
 
-  // --- Шейдеры
+  // Шейдеры
   const vsSrc = `
     attribute vec2 p;
     varying vec2 v;
-    void main(){ v=p; gl_Position=vec4(p,0.0,1.0); }
+    void main(){ v = p; gl_Position = vec4(p,0.0,1.0); }
   `;
   const fsSrc = `
     precision highp float;
     varying vec2 v;
     uniform sampler2D pano;
     uniform vec2 res;
-    uniform float yaw;
-    uniform float pitch;
-    uniform float roll;
-    uniform float fov;
-
+    uniform float yaw;   // радианы
+    uniform float pitch; // радианы
+    uniform float fov;   // радианы
     vec3 rayDir(vec2 uv, float fovY){
       float yScale = tan(fovY*0.5);
       float xScale = yScale * (res.x/res.y);
       return normalize(vec3(uv.x*xScale, uv.y*yScale, -1.0));
     }
-    mat3 rotX(float a){ float c=cos(a), s=sin(a); return mat3(1.,0.,0., 0.,c,s, 0.,-s,c); }
     mat3 rotY(float a){ float c=cos(a), s=sin(a); return mat3(c,0.,-s, 0.,1.,0., s,0.,c); }
-    mat3 rotZ(float a){ float c=cos(a), s=sin(a); return mat3(c,s,0., -s,c,0., 0.,0.,1.); }
-
+    mat3 rotX(float a){ float c=cos(a), s=sin(a); return mat3(1.,0.,0., 0.,c,s, 0.,-s,c); }
     void main(){
-      vec3 d = rotZ(roll) * rotY(yaw) * (rotX(pitch) * rayDir(v, fov));
+      vec3 d = rotY(yaw) * (rotX(pitch) * rayDir(v, fov));
       float lon = atan(d.z, d.x);
-      float lat = asin(clamp(d.y, -1.0, 1.0));
+      float lat = asin(clamp(d.y, -1.0,1.0));
       float u = lon/(2.0*3.141592653589793) + 0.5;
       float vv = 0.5 - (lat/3.141592653589793);
       u = fract(u);
@@ -68,151 +63,211 @@
       gl_FragColor = texture2D(pano, vec2(u, vv));
     }
   `;
-  function sh(t,src){const s=gl.createShader(t);gl.shaderSource(s,src);gl.compileShader(s);if(!gl.getShaderParameter(s,gl.COMPILE_STATUS))throw new Error(gl.getShaderInfoLog(s));return s;}
+  function compile(type, src){
+    const sh = gl.createShader(type);
+    gl.shaderSource(sh, src);
+    gl.compileShader(sh);
+    if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(sh)||'shader compile error');
+    return sh;
+  }
   const prog = gl.createProgram();
-  gl.attachShader(prog, sh(gl.VERTEX_SHADER, vsSrc));
-  gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, fsSrc));
+  gl.attachShader(prog, compile(gl.VERTEX_SHADER, vsSrc));
+  gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, fsSrc));
   gl.linkProgram(prog);
+  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog)||'link error');
   gl.useProgram(prog);
 
-  // --- Геометрия
+  // Геометрия
   const buf = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1,1,-1,-1,1, 1,-1,1,1,-1,1]), gl.STATIC_DRAW);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+    -1,-1,  1,-1,  -1,1,
+     1,-1,  1, 1,  -1,1
+  ]), gl.STATIC_DRAW);
   const locP = gl.getAttribLocation(prog, 'p');
   gl.enableVertexAttribArray(locP);
   gl.vertexAttribPointer(locP, 2, gl.FLOAT, false, 0, 0);
 
-  // --- Uniforms
+  // Uniforms
   const uRes   = gl.getUniformLocation(prog, 'res');
   const uYaw   = gl.getUniformLocation(prog, 'yaw');
   const uPitch = gl.getUniformLocation(prog, 'pitch');
-  const uRoll  = gl.getUniformLocation(prog, 'roll');
   const uFov   = gl.getUniformLocation(prog, 'fov');
-  const uPano  = gl.getUniformLocation(prog, 'pano');
-  gl.uniform1i(uPano, 0);
 
-  // --- Текстура
+  // Текстура
   const tex = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, tex);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-  // дефолт: 1x1 серый
-  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
-  gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,1,1,0,gl.RGBA,gl.UNSIGNED_BYTE,new Uint8Array([80,80,80,255]));
 
-  function loadImage(src){ return new Promise((res,rej)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=rej; i.src=src; }); }
+  function loadImage(src){
+    return new Promise((resolve, reject)=>{
+      const img = new Image();
+      img.onload = ()=> resolve(img);
+      img.onerror = reject;
+      img.src = src;
+    });
+  }
   function setTexture(img){
     gl.bindTexture(gl.TEXTURE_2D, tex);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
-    gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,img);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+    gl.bindTexture(gl.TEXTURE_2D, null);
+    if (img.width !== 2*img.height) notice.textContent = `Внимание: ${img.width}×${img.height}, нужна пропорция 2:1.`;
   }
 
+  // Загрузка дефолтного файла
   loadImage('panorama_4096x2048.jpg')
-    .then(img=>{ setTexture(img); say('Загружено: panorama_4096x2048.jpg'); })
-    .catch(()=> say('Выбери файл панорамы.'));
+    .then(img => { setTexture(img); notice.textContent = 'Загружено: panorama_4096x2048.jpg'; })
+    .catch(()=> { notice.textContent = 'Выбери файл панорамы (2:1) через «Выбрать файл».'; });
 
+  // Файл из input
   document.getElementById('picker').addEventListener('change', e=>{
-    const f=e.target.files&&e.target.files[0]; if(!f) return;
-    loadImage(URL.createObjectURL(f)).then(img=>{ setTexture(img); say('Загружено: '+f.name); });
+    const f = e.target.files && e.target.files[0];
+    if (!f) return;
+    loadImage(URL.createObjectURL(f)).then(img => { setTexture(img); notice.textContent = 'Загружено: '+(f.name||'file'); });
   });
 
-  // --- Состояние камеры
-  let yaw=0,pitch=0,roll=0,fov=Math.PI/3;
+  // Состояние камеры
+  let yaw = 0.0;
+  let pitch = 0.0;
+  let fov = Math.PI/3.;
+  const minFov = Math.PI/9.;   // 20°
+  const maxFov = Math.PI/1.8;  // 100°
 
-  // ориентация экрана
-  let scrAng = (screen.orientation && screen.orientation.angle) || window.orientation || 0;
-  window.addEventListener('orientationchange', ()=> {
-    scrAng = (screen.orientation && screen.orientation.angle) || window.orientation || 0;
+  // Мышь
+  let dragging=false, lastX=0, lastY=0;
+  cnv.addEventListener('mousedown', e=>{ if(gyroOn) return; dragging=true; lastX=e.clientX; lastY=e.clientY; });
+  window.addEventListener('mouseup', ()=> dragging=false);
+  window.addEventListener('mousemove', e=>{
+    if(gyroOn || !dragging) return;
+    const dx = e.clientX - lastX;
+    const dy = e.clientY - lastY;
+    lastX = e.clientX; lastY = e.clientY;
+    const speed = 0.005;
+    yaw   += dx * speed;   // оставлено как в твоём файле
+    pitch -= dy * speed;
+    const lim = Math.PI/2 - 0.001;
+    if (pitch >  lim) pitch =  lim;
+    if (pitch < -lim) pitch = -lim;
   });
 
-  // фильтр yaw
-  let prevA=null,yawVel=0;
-  const LPF=0.25;
+  // Зум
+  cnv.addEventListener('wheel', e=>{
+    e.preventDefault();
+    fov *= (1 + Math.sign(e.deltaY)*0.1);
+    if (fov < minFov) fov = minFov;
+    if (fov > maxFov) fov = maxFov;
+  }, {passive:false});
 
-  // математика для roll
-  const ca=Math.cos, sa=Math.sin;
-  function Rz(t){ const c=ca(t), s=sa(t); return [[c,-s,0],[s,c,0],[0,0,1]]; }
-  function Rx(t){ const c=ca(t), s=sa(t); return [[1,0,0],[0,c,s],[0,-s,c]]; }
-  function Ry(t){ const c=ca(t), s=sa(t); return [[c,0,-s],[0,1,0],[s,0,c]]; }
-  function mul(A,B){ return [
-    [A[0][0]*B[0][0]+A[0][1]*B[1][0]+A[0][2]*B[2][0],
-     A[0][0]*B[0][1]+A[0][1]*B[1][1]+A[0][2]*B[2][1],
-     A[0][0]*B[0][2]+A[0][1]*B[1][2]+A[0][2]*B[2][2]],
-    [A[1][0]*B[0][0]+A[1][1]*B[1][0]+A[1][2]*B[2][0],
-     A[1][0]*B[0][1]+A[1][1]*B[1][1]+A[1][2]*B[2][1],
-     A[1][0]*B[0][2]+A[1][1]*B[1][2]+A[1][2]*B[2][2]],
-    [A[2][0]*B[0][0]+A[2][1]*B[1][0]+A[2][2]*B[2][0],
-     A[2][0]*B[0][1]+A[2][1]*B[1][1]+A[2][2]*B[2][1],
-     A[2][0]*B[0][2]+A[2][1]*B[1][2]+A[2][2]*B[2][2]],
-  ];}
-  function tr(A){ return [[A[0][0],A[1][0],A[2][0]],[A[0][1],A[1][1],A[2][1]],[A[0][2],A[1][2],A[2][2]]]; }
+  // Кнопки
+  document.getElementById('centerBtn').addEventListener('click', ()=>{
+    yaw = 0.0; pitch = 0.0; fov = Math.PI/3.;
+  });
+  document.getElementById('fsBtn').addEventListener('click', ()=>{
+    const el = document.documentElement;
+    if (!document.fullscreenElement) el.requestFullscreen?.();
+    else document.exitFullscreen?.();
+  });
 
-  function handleOrient(ev){
-    const a=(ev.alpha||0)*Math.PI/180;
-    const b=(ev.beta ||0)*Math.PI/180;
-    const g=(ev.gamma||0)*Math.PI/180;
+  // Гироскоп
+  let gyroOn = false;
+  let orientHandler = null;
+  let prevA = null; // хранит прошлый угол
 
-    if(prevA===null) prevA=a;
-    let da=a-prevA;
-    while(da>Math.PI) da-=2*Math.PI;
-    while(da<-Math.PI) da+=2*Math.PI;
-    prevA+=da;
-    yawVel=yawVel*(1-LPF)+da*LPF;
-    yaw+=yawVel;
+function unwrap(prev, cur){
+  let d = cur - prev;
+  while (d >  Math.PI) d -= 2*Math.PI;
+  while (d < -Math.PI) d += 2*Math.PI;
+  return prev + d;
+}
 
-    const lim=Math.PI/2-0.001;
-    pitch=Math.max(-lim,Math.min(lim,b-Math.PI/2));
+let prevA = null;
+let yawVel = 0;
+const LPF = 0.25;      // коэффициент сглаживания
+const HORIZ_SOFT = 0.30;  // ширина «мертвой зоны» у горизонта
 
-    const ang=((scrAng%360)+360)%360*Math.PI/180;
-    let R=mul(Rz(a),mul(Rx(b),Ry(g)));
-    R=mul(Rz(-ang),R);
-    const A=mul(Ry(yaw),Rx(pitch));
-    const M=mul(tr(A),R);
-    const rollRaw=Math.atan2(M[0][1],M[1][1]);
-    roll=roll*0.75+rollRaw*0.25;
-  }
+function handleOrient(ev){
+  const a = (ev.alpha||0) * Math.PI/180;
+  const b = (ev.beta ||0) * Math.PI/180;
 
-  // --- Гиро
-  const gyroBtn=document.getElementById('gyroBtn');
-  let gyroOn=false;
-  function enableGyro(){
-    if(gyroOn) return;
-    window.addEventListener('deviceorientation',handleOrient,true);
-    gyroOn=true; gyroBtn.textContent='Гироскоп: вкл';
+  if (prevA === null) prevA = a;
+  let d = a - prevA;
+  while (d >  Math.PI) d -= 2*Math.PI;
+  while (d < -Math.PI) d += 2*Math.PI;
+  const aSmooth = prevA + d;
+
+  let da = aSmooth - prevA;
+  prevA = aSmooth;
+
+  // приглушаем около горизонта
+  const w = Math.max(0, Math.min(1, Math.abs(Math.cos(b)) - HORIZ_SOFT)) / (1 - HORIZ_SOFT);
+  da *= w;
+
+  // фильтр скорости
+  yawVel = yawVel*(1-LPF) + da*LPF;
+  yaw += yawVel;
+
+  const lim = Math.PI/2 - 0.001;
+  pitch = Math.max(-lim, Math.min(lim, b - Math.PI/2));
+}
+
+}
+
+  async function enableGyro(){
+    if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+      try {
+        const s = await DeviceMotionEvent.requestPermission();
+        if (s !== 'granted'){ notice.textContent='Разреши доступ к датчикам движения.'; return; }
+      } catch { notice.textContent='Гироскоп запрещён системой.'; return; }
+    }
+    orientHandler = handleOrient;
+    window.addEventListener('deviceorientation', orientHandler, true);
+    gyroOn = true; dragging=false;
+    gyroBtn.textContent = 'Гироскоп: вкл';
+    notice.textContent = 'Гироскоп активен. Двигай устройство для обзора.';
   }
   function disableGyro(){
-    if(!gyroOn) return;
-    window.removeEventListener('deviceorientation',handleOrient,true);
-    gyroOn=false; gyroBtn.textContent='Гироскоп: выкл';
+    if (orientHandler) window.removeEventListener('deviceorientation', orientHandler, true);
+    orientHandler = null; gyroOn = false;
+    gyroBtn.textContent = 'Гироскоп: выкл';
+    notice.textContent = 'Гироскоп отключён.';
   }
-  gyroBtn.addEventListener('click',()=>gyroOn?disableGyro():enableGyro());
-  enableGyro();
+  gyroBtn.addEventListener('click', ()=> gyroOn ? disableGyro() : enableGyro());
+enableGyro();
 
-  // --- Resize + Render
+  // Resize
   function resize(){
-    const ratio=Math.min(window.devicePixelRatio||1,1.5);
-    cnv.width=innerWidth*ratio; cnv.height=innerHeight*ratio;
-    gl.viewport(0,0,cnv.width,cnv.height);
-    gl.uniform2f(uRes,cnv.width,cnv.height);
+    const ratio = Math.min(window.devicePixelRatio||1, 1.5);
+    const w = Math.floor(innerWidth * ratio);
+    const h = Math.floor(innerHeight * ratio);
+    cnv.width = w; cnv.height = h;
+    cnv.style.width = innerWidth+'px';
+    cnv.style.height = innerHeight+'px';
+    gl.viewport(0,0,w,h);
+    gl.uniform2f(uRes, w, h);
   }
-  addEventListener('resize',resize); resize();
+  window.addEventListener('resize', resize);
+  resize();
 
+  // Render
   function frame(){
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.useProgram(prog);
     gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D,tex);
-    gl.uniform1f(uYaw,yaw);
-    gl.uniform1f(uPitch,pitch);
-    gl.uniform1f(uRoll,roll);
-    gl.uniform1f(uFov,fov);
-    gl.drawArrays(gl.TRIANGLES,0,6);
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.uniform1f(uYaw, yaw);
+    gl.uniform1f(uPitch, pitch);
+    gl.uniform1f(uFov, fov);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
     requestAnimationFrame(frame);
   }
   frame();
+
+  // Диагностика
+  window.addEventListener('error', e=>{ notice.textContent = 'JS-ошибка: '+e.message; });
 })();
 </script>
 </body>
