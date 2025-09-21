@@ -32,7 +32,7 @@
   const say = s => note.textContent = s;
   if (!gl) { say('WebGL недоступен.'); return; }
 
-  // --- Шейдеры (yaw, pitch, roll)
+  // --- Шейдеры
   const vsSrc = `
     attribute vec2 p;
     varying vec2 v;
@@ -99,9 +99,16 @@
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  // дефолт: 1x1 серый
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+  gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,1,1,0,gl.RGBA,gl.UNSIGNED_BYTE,new Uint8Array([80,80,80,255]));
 
   function loadImage(src){ return new Promise((res,rej)=>{ const i=new Image(); i.onload=()=>res(i); i.onerror=rej; i.src=src; }); }
-  function setTexture(img){ gl.bindTexture(gl.TEXTURE_2D, tex); gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,img); }
+  function setTexture(img){
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,img);
+  }
 
   loadImage('panorama_4096x2048.jpg')
     .then(img=>{ setTexture(img); say('Загружено: panorama_4096x2048.jpg'); })
@@ -112,9 +119,8 @@
     loadImage(URL.createObjectURL(f)).then(img=>{ setTexture(img); say('Загружено: '+f.name); });
   });
 
-  // --- Состояние
+  // --- Состояние камеры
   let yaw=0,pitch=0,roll=0,fov=Math.PI/3;
-  let gyroOn=false, prevA=null, yawVel=0;
 
   // ориентация экрана
   let scrAng = (screen.orientation && screen.orientation.angle) || window.orientation || 0;
@@ -122,11 +128,11 @@
     scrAng = (screen.orientation && screen.orientation.angle) || window.orientation || 0;
   });
 
-  // --- Гиро обработчик
-  const LPF=0.25;           // сглаживание yaw
-  const gyroBtn=document.getElementById('gyroBtn');
+  // фильтр yaw
+  let prevA=null,yawVel=0;
+  const LPF=0.25;
 
-  // вспомогательная математика для устойчивого roll
+  // математика для roll
   const ca=Math.cos, sa=Math.sin;
   function Rz(t){ const c=ca(t), s=sa(t); return [[c,-s,0],[s,c,0],[0,0,1]]; }
   function Rx(t){ const c=ca(t), s=sa(t); return [[1,0,0],[0,c,s],[0,-s,c]]; }
@@ -145,54 +151,45 @@
   function tr(A){ return [[A[0][0],A[1][0],A[2][0]],[A[0][1],A[1][1],A[2][1]],[A[0][2],A[1][2],A[2][2]]]; }
 
   function handleOrient(ev){
-    const a=(ev.alpha||0)*Math.PI/180; // yaw-сенсор
-    const b=(ev.beta ||0)*Math.PI/180; // pitch-сенсор
-    const g=(ev.gamma||0)*Math.PI/180; // roll-сенсор
+    const a=(ev.alpha||0)*Math.PI/180;
+    const b=(ev.beta ||0)*Math.PI/180;
+    const g=(ev.gamma||0)*Math.PI/180;
 
-    // YAW: unwrap + фильтр
     if(prevA===null) prevA=a;
-    let da = a - prevA;
-    while(da> Math.PI) da -= 2*Math.PI;
-    while(da<-Math.PI) da += 2*Math.PI;
-    prevA += da;
-    yawVel = yawVel*(1-LPF) + da*LPF;
-    yaw += yawVel;
+    let da=a-prevA;
+    while(da>Math.PI) da-=2*Math.PI;
+    while(da<-Math.PI) da+=2*Math.PI;
+    prevA+=da;
+    yawVel=yawVel*(1-LPF)+da*LPF;
+    yaw+=yawVel;
 
-    // PITCH: из β с ограничением
-    const lim = Math.PI/2 - 0.001;
-    pitch = Math.max(-lim, Math.min(lim, b - Math.PI/2));
+    const lim=Math.PI/2-0.001;
+    pitch=Math.max(-lim,Math.min(lim,b-Math.PI/2));
 
-    // ROLL: устойчивое извлечение из матриц (без перескока на горизонте)
-    const ang = (((scrAng%360)+360)%360) * Math.PI/180;
-    let R = mul(Rz(a), mul(Rx(b), Ry(g)));  // ориентация устройства (W3C)
-    R = mul(Rz(-ang), R);                   // поправка на ориентацию экрана
-    const A = mul(Ry(yaw), Rx(pitch));      // наша текущая камера по yaw/pitch
-    const M = mul(tr(A), R);                // остаток должен быть чистым Rz(roll)
-    const rollRaw = Math.atan2(M[0][1], M[1][1]);
-
-    // можно слегка сгладить roll, но без подавления на горизонте
-    // (если хочешь мгновенный отклик — просто: roll = rollRaw;)
-    roll = roll*0.75 + rollRaw*0.25;
+    const ang=((scrAng%360)+360)%360*Math.PI/180;
+    let R=mul(Rz(a),mul(Rx(b),Ry(g)));
+    R=mul(Rz(-ang),R);
+    const A=mul(Ry(yaw),Rx(pitch));
+    const M=mul(tr(A),R);
+    const rollRaw=Math.atan2(M[0][1],M[1][1]);
+    roll=roll*0.75+rollRaw*0.25;
   }
 
-  // --- Вкл/выкл гиро
-  let gyroOn=false, orientHandler=null;
-  async function enableGyro(){
-    if(typeof DeviceMotionEvent!=='undefined' && typeof DeviceMotionEvent.requestPermission==='function'){
-      try{const s=await DeviceMotionEvent.requestPermission(); if(s!=='granted'){say('Разреши доступ к датчикам.');return;}}catch{return;}
-    }
-    orientHandler=handleOrient;
-    window.addEventListener('deviceorientation',orientHandler,true);
-    gyroOn=true;
-    gyroBtn.textContent='Гироскоп: вкл';
+  // --- Гиро
+  const gyroBtn=document.getElementById('gyroBtn');
+  let gyroOn=false;
+  function enableGyro(){
+    if(gyroOn) return;
+    window.addEventListener('deviceorientation',handleOrient,true);
+    gyroOn=true; gyroBtn.textContent='Гироскоп: вкл';
   }
   function disableGyro(){
-    if(orientHandler) window.removeEventListener('deviceorientation',orientHandler,true);
-    orientHandler=null; gyroOn=false;
-    gyroBtn.textContent='Гироскоп: выкл';
+    if(!gyroOn) return;
+    window.removeEventListener('deviceorientation',handleOrient,true);
+    gyroOn=false; gyroBtn.textContent='Гироскоп: выкл';
   }
-  gyroBtn.addEventListener('click',()=> gyroOn ? disableGyro():enableGyro());
-  enableGyro(); // автозапуск
+  gyroBtn.addEventListener('click',()=>gyroOn?disableGyro():enableGyro());
+  enableGyro();
 
   // --- Resize + Render
   function resize(){
@@ -206,6 +203,7 @@
   function frame(){
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.useProgram(prog);
+    gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D,tex);
     gl.uniform1f(uYaw,yaw);
     gl.uniform1f(uPitch,pitch);
