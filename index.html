@@ -1,1 +1,202 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>360° Панорама</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: #000;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        color: #fff;
+      }
+
+      #viewer {
+        position: fixed;
+        inset: 0;
+      }
+
+      #gyro-permission {
+        position: fixed;
+        inset: auto 1.5rem 1.5rem auto;
+        border: none;
+        border-radius: 999px;
+        background: rgba(0, 0, 0, 0.65);
+        color: inherit;
+        padding: 0.85rem 1.5rem;
+        font-size: 1rem;
+        font-weight: 600;
+        cursor: pointer;
+        box-shadow: 0 0 15px rgba(0, 0, 0, 0.4);
+        backdrop-filter: blur(6px);
+        transition: transform 120ms ease, background 120ms ease;
+        display: none;
+      }
+
+      #gyro-permission:active,
+      #gyro-permission:hover {
+        transform: scale(1.03);
+        background: rgba(255, 255, 255, 0.12);
+      }
+
+      #message {
+        position: fixed;
+        left: 50%;
+        bottom: 1.5rem;
+        transform: translateX(-50%);
+        padding: 0.75rem 1rem;
+        border-radius: 0.75rem;
+        background: rgba(0, 0, 0, 0.55);
+        font-size: 0.95rem;
+        line-height: 1.3;
+        text-align: center;
+        max-width: calc(100% - 3rem);
+        pointer-events: none;
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="viewer"></div>
+    <button id="gyro-permission" type="button">Включить гироскоп</button>
+    <div id="message"></div>
+
+    <script src="three.min.js"></script>
+    <script src="OrbitControls.js"></script>
+    <script src="DeviceOrientationControls.js"></script>
+    <script>
+      const container = document.getElementById('viewer');
+      const message = document.getElementById('message');
+      const gyroButton = document.getElementById('gyro-permission');
+
+      let renderer, scene, camera;
+      let orbitControls, deviceControls;
+      let activeControl = 'orbit';
+
+      init();
+      animate();
+
+      function init() {
+        scene = new THREE.Scene();
+
+        camera = new THREE.PerspectiveCamera(
+          75,
+          window.innerWidth / window.innerHeight,
+          0.1,
+          1100
+        );
+        camera.position.set(0, 0, 0.1);
+
+        renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        container.appendChild(renderer.domElement);
+
+        const geometry = new THREE.SphereBufferGeometry(500, 60, 40);
+        geometry.scale(-1, 1, 1);
+
+        const textureLoader = new THREE.TextureLoader();
+        textureLoader.load(
+          'panorama_4096x2048.jpg',
+          (texture) => {
+            texture.colorSpace = THREE.SRGBColorSpace;
+            const material = new THREE.MeshBasicMaterial({ map: texture });
+            const mesh = new THREE.Mesh(geometry, material);
+            scene.add(mesh);
+          },
+          undefined,
+          (error) => {
+            showMessage('Не удалось загрузить панораму.');
+            console.error('Ошибка загрузки текстуры панорамы', error);
+          }
+        );
+
+        orbitControls = new THREE.OrbitControls(camera, renderer.domElement);
+        orbitControls.enableZoom = false;
+        orbitControls.enablePan = false;
+        orbitControls.rotateSpeed = 0.4;
+
+        setupDeviceControls();
+        window.addEventListener('resize', onWindowResize);
+      }
+
+      function setupDeviceControls() {
+        if (typeof DeviceOrientationEvent === 'undefined') {
+          return;
+        }
+
+        const enableGyroControls = () => {
+          try {
+            deviceControls = new THREE.DeviceOrientationControls(camera);
+            deviceControls.connect();
+            activeControl = 'device';
+            orbitControls.enabled = false;
+            hideMessage();
+          } catch (error) {
+            console.error('Не удалось инициализировать DeviceOrientationControls', error);
+            showMessage('Не удалось активировать гироскоп.');
+          }
+        };
+
+        if (
+          typeof DeviceOrientationEvent.requestPermission === 'function'
+        ) {
+          // iOS 13+
+          gyroButton.style.display = 'inline-flex';
+          gyroButton.addEventListener('click', () => {
+            DeviceOrientationEvent.requestPermission()
+              .then((state) => {
+                if (state === 'granted') {
+                  gyroButton.style.display = 'none';
+                  enableGyroControls();
+                  showMessage('Управляйте устройством, чтобы осмотреться.');
+                  setTimeout(hideMessage, 4000);
+                } else {
+                  showMessage('Доступ к гироскопу отклонён.');
+                }
+              })
+              .catch((error) => {
+                console.error('Ошибка запроса доступа к гироскопу', error);
+                showMessage('Не удалось запросить доступ к гироскопу.');
+              });
+          });
+        } else {
+          // Android и другие платформы
+          enableGyroControls();
+        }
+      }
+
+      function onWindowResize() {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      }
+
+      function animate() {
+        requestAnimationFrame(animate);
+
+        if (activeControl === 'device' && deviceControls) {
+          deviceControls.update();
+        } else if (orbitControls) {
+          orbitControls.update();
+        }
+
+        renderer.render(scene, camera);
+      }
+
+      function showMessage(text) {
+        message.textContent = text;
+        message.style.display = 'block';
+      }
+
+      function hideMessage() {
+        message.style.display = 'none';
+      }
+    </script>
+  </body>
+</html>
 
