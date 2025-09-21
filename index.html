@@ -10,7 +10,8 @@
   #ui{position:fixed;left:12px;top:12px;display:flex;gap:8px;z-index:10;flex-wrap:wrap}
   #ui>*{background:#111a;border:1px solid #333;border-radius:10px;padding:6px 10px;font-size:14px}
   #note{position:fixed;left:12px;bottom:12px;background:#111a;border:1px solid #333;border-radius:10px;padding:8px 10px;z-index:10;max-width:min(92vw,860px)}
-  canvas{display:block;width:100vw;height:100vh}
+  canvas{display:block;width:100vw;height:100vh;touch-action:none;cursor:grab}
+  canvas.dragging{cursor:grabbing}
   button{cursor:pointer}
 </style>
 </head>
@@ -115,6 +116,15 @@
   let gyroOn=false, orientHandler=null, prevA=null, yawVel=0;
   const LPF=0.25, HORIZ_SOFT=0.3;
   const gyroBtn=document.getElementById('gyroBtn');
+  const centerBtn=document.getElementById('centerBtn');
+  const fsBtn=document.getElementById('fsBtn');
+  const PITCH_LIMIT=Math.PI/2-0.001;
+  const MIN_FOV=Math.PI/9;
+  const MAX_FOV=Math.PI/1.1;
+
+  const clamp=(v,min,max)=>v<min?min:v>max?max:v;
+  const clampPitch=v=>clamp(v,-PITCH_LIMIT,PITCH_LIMIT);
+  const clampFov=v=>clamp(v,MIN_FOV,MAX_FOV);
 
   // ориентация экрана для корректного roll в портрете/ландшафте
   let scrAng = (screen.orientation && screen.orientation.angle) || window.orientation || 0;
@@ -123,23 +133,25 @@
   });
 
   function handleOrient(ev){
-    const a=(ev.alpha||0)*Math.PI/180;   // yaw
-    const b=(ev.beta ||0)*Math.PI/180;   // pitch-сенсор
-    const g=(ev.gamma||0)*Math.PI/180;   // roll-сенсор
+    if(!gyroOn) return;
+    if(ev.alpha==null || ev.beta==null || ev.gamma==null) return;
+    const a=ev.alpha*Math.PI/180;   // yaw
+    const b=ev.beta *Math.PI/180;   // pitch-сенсор
+    const g=ev.gamma*Math.PI/180;   // roll-сенсор
 
     // unwrap + сглаживание yaw
     if(prevA===null) prevA=a;
     let d=a-prevA; while(d>Math.PI)d-=2*Math.PI; while(d<-Math.PI)d+=2*Math.PI;
     const aSmooth=prevA+d;
     let da=aSmooth-prevA; prevA=aSmooth;
-    const w=Math.max(0,Math.min(1,Math.abs(Math.cos(b))-HORIZ_SOFT))/(1-HORIZ_SOFT);
+    const wRaw=Math.abs(Math.cos(b));
+    const w=wRaw<=HORIZ_SOFT?0:(wRaw-HORIZ_SOFT)/(1-HORIZ_SOFT);
     da*=w;
     yawVel=yawVel*(1-LPF)+da*LPF;
     yaw+=yawVel;
 
     // ПОЛНЫЙ НАКЛОН ВПЕРЕД/НАЗАД: возвращаем pitch из β
-    const lim = Math.PI/2 - 0.001;
-    pitch = Math.max(-lim, Math.min(lim, b - Math.PI/2));
+    pitch = clampPitch(b - Math.PI/2);
 
     // НАКЛОН ВЛЕВО/ВПРАВО: roll из γ с учётом ориентации экрана
     const ang = ((scrAng%360)+360)%360;
@@ -150,10 +162,25 @@
     roll = r;
   }
 
-  async function enableGyro(){
-    if(typeof DeviceMotionEvent!=='undefined' && typeof DeviceMotionEvent.requestPermission==='function'){
-      try{const s=await DeviceMotionEvent.requestPermission(); if(s!=='granted'){say('Разреши доступ к датчикам.');return;}}catch{return;}
+  async function enableGyro(auto=false){
+    if(gyroOn) return;
+    if(typeof DeviceOrientationEvent==='undefined'){
+      if(!auto) say('Гироскоп не поддерживается этим браузером.');
+      return;
     }
+    const needsPermission=typeof DeviceOrientationEvent.requestPermission==='function';
+    if(auto && needsPermission) return;
+    if(needsPermission){
+      try{
+        const s=await DeviceOrientationEvent.requestPermission();
+        if(s!=='granted'){ say('Разреши доступ к ориентации устройства.'); return; }
+      }catch(err){
+        say('Нет доступа к ориентации устройства.');
+        return;
+      }
+    }
+    prevA=null;
+    yawVel=0;
     orientHandler=handleOrient;
     window.addEventListener('deviceorientation',orientHandler,true);
     gyroOn=true;
@@ -163,11 +190,133 @@
   function disableGyro(){
     if(orientHandler) window.removeEventListener('deviceorientation',orientHandler,true);
     orientHandler=null; gyroOn=false;
+    prevA=null;
+    yawVel=0;
     gyroBtn.textContent='Гироскоп: выкл';
   }
 
   gyroBtn.addEventListener('click',()=> gyroOn ? disableGyro():enableGyro());
-  enableGyro(); // автозапуск
+  const needsPermission=(typeof DeviceOrientationEvent!=='undefined') && (typeof DeviceOrientationEvent.requestPermission==='function');
+  if(!needsPermission) enableGyro(true); // автозапуск без запроса разрешений
+
+  centerBtn.addEventListener('click',()=>{
+    yaw=0; pitch=0; roll=0;
+    fov=Math.PI/3;
+    prevA=null;
+    yawVel=0;
+  });
+
+  const isFullscreen=()=>!!(document.fullscreenElement||document.webkitFullscreenElement||document.msFullscreenElement);
+  function updateFsBtn(){ fsBtn.textContent=isFullscreen()?'Exit FS':'Fullscreen'; }
+  updateFsBtn();
+  document.addEventListener('fullscreenchange',updateFsBtn);
+  document.addEventListener('webkitfullscreenchange',updateFsBtn);
+  document.addEventListener('msfullscreenchange',updateFsBtn);
+  fsBtn.addEventListener('click',()=>{
+    if(!isFullscreen()){
+      const el=document.documentElement||document.body;
+      if(el.requestFullscreen) el.requestFullscreen();
+      else if(el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+      else if(el.msRequestFullscreen) el.msRequestFullscreen();
+    }else{
+      if(document.exitFullscreen) document.exitFullscreen();
+      else if(document.webkitExitFullscreen) document.webkitExitFullscreen();
+      else if(document.msExitFullscreen) document.msExitFullscreen();
+    }
+  });
+
+  const pointers=new Map();
+  let primaryPointerId=null;
+  let pinchStartDist=null;
+  let pinchStartFov=null;
+
+  const pointerPos=ev=>({x:ev.clientX,y:ev.clientY});
+  const firstTwoPointers=()=>{
+    const vals=[];
+    for(const v of pointers.values()){ vals.push(v); if(vals.length===2) break; }
+    return vals.length===2?vals:null;
+  };
+  const updateDraggingState=()=>{ if(pointers.size>0) cnv.classList.add('dragging'); else cnv.classList.remove('dragging'); };
+
+  cnv.addEventListener('pointerdown',ev=>{
+    if(ev.pointerType==='mouse' && ev.button!==0) return;
+    if(cnv.setPointerCapture) try{ cnv.setPointerCapture(ev.pointerId); }catch(_){ }
+    pointers.set(ev.pointerId,pointerPos(ev));
+    if(primaryPointerId===null) primaryPointerId=ev.pointerId;
+    if(pointers.size===2){
+      const pair=firstTwoPointers();
+      if(pair){
+        pinchStartDist=Math.hypot(pair[0].x-pair[1].x,pair[0].y-pair[1].y)||1;
+        pinchStartFov=fov;
+      }
+    }
+    updateDraggingState();
+    ev.preventDefault();
+  });
+
+  cnv.addEventListener('pointermove',ev=>{
+    if(!pointers.has(ev.pointerId)) return;
+    const prev=pointers.get(ev.pointerId);
+    const pos=pointerPos(ev);
+    pointers.set(ev.pointerId,pos);
+
+    if(pointers.size===1 && primaryPointerId===ev.pointerId){
+      const dx=pos.x-prev.x;
+      const dy=pos.y-prev.y;
+      yaw-=dx*0.005;
+      pitch=clampPitch(pitch-dy*0.005);
+    }else if(pointers.size>=2 && pinchStartDist){
+      const pair=firstTwoPointers();
+      if(pair){
+        const dist=Math.hypot(pair[0].x-pair[1].x,pair[0].y-pair[1].y);
+        if(dist>0){
+          const scale=clamp((pinchStartDist/dist),0.25,4);
+          fov=clampFov(pinchStartFov*scale);
+        }
+      }
+    }
+    ev.preventDefault();
+  });
+
+  function releasePointer(ev){
+    if(!pointers.has(ev.pointerId)) return;
+    if(cnv.releasePointerCapture) try{ cnv.releasePointerCapture(ev.pointerId); }catch(_){ }
+    pointers.delete(ev.pointerId);
+    if(primaryPointerId===ev.pointerId){
+      const next=pointers.keys().next();
+      primaryPointerId=next.done?null:next.value;
+    }
+    if(pointers.size<2){
+      pinchStartDist=null;
+      pinchStartFov=null;
+    }else{
+      const pair=firstTwoPointers();
+      if(pair){
+        pinchStartDist=Math.hypot(pair[0].x-pair[1].x,pair[0].y-pair[1].y)||1;
+        pinchStartFov=fov;
+      }
+    }
+    updateDraggingState();
+  }
+
+  cnv.addEventListener('pointerup',releasePointer);
+  cnv.addEventListener('pointercancel',releasePointer);
+  cnv.addEventListener('lostpointercapture',releasePointer);
+  window.addEventListener('blur',()=>{
+    pointers.clear();
+    primaryPointerId=null;
+    pinchStartDist=null;
+    pinchStartFov=null;
+    updateDraggingState();
+  });
+
+  cnv.addEventListener('wheel',ev=>{
+    if(ev.ctrlKey) return;
+    const scale=Math.exp(ev.deltaY*0.001);
+    fov=clampFov(fov*scale);
+    ev.preventDefault();
+  },{passive:false});
+  cnv.addEventListener('contextmenu',ev=>ev.preventDefault());
 
   // --- Resize + Render
   function resize(){
