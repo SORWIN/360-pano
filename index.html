@@ -175,47 +175,14 @@
   // Гироскоп
   let gyroOn = false;
   let orientHandler = null;
-  let prevA = null; // хранит прошлый угол
-
-function unwrap(prev, cur){
-  let d = cur - prev;
-  while (d >  Math.PI) d -= 2*Math.PI;
-  while (d < -Math.PI) d += 2*Math.PI;
-  return prev + d;
-}
-
-let prevA = null;
-let yawVel = 0;
-const LPF = 0.25;      // коэффициент сглаживания
-const HORIZ_SOFT = 0.30;  // ширина «мертвой зоны» у горизонта
-
-function handleOrient(ev){
-  const a = (ev.alpha||0) * Math.PI/180;
-  const b = (ev.beta ||0) * Math.PI/180;
-
-  if (prevA === null) prevA = a;
-  let d = a - prevA;
-  while (d >  Math.PI) d -= 2*Math.PI;
-  while (d < -Math.PI) d += 2*Math.PI;
-  const aSmooth = prevA + d;
-
-  let da = aSmooth - prevA;
-  prevA = aSmooth;
-
-  // приглушаем около горизонта
-  const w = Math.max(0, Math.min(1, Math.abs(Math.cos(b)) - HORIZ_SOFT)) / (1 - HORIZ_SOFT);
-  da *= w;
-
-  // фильтр скорости
-  yawVel = yawVel*(1-LPF) + da*LPF;
-  yaw += yawVel;
-
-  const lim = Math.PI/2 - 0.001;
-  pitch = Math.max(-lim, Math.min(lim, b - Math.PI/2));
-}
-
-}
-
+  function handleOrient(ev){
+    // alpha: компас, beta: наклон вперёд/назад
+    const a = (ev.alpha||0) * Math.PI/180;
+    const b = (ev.beta ||0) * Math.PI/180;
+    yaw = +a;                      // естественное ощущение поворота
+    const lim = Math.PI/2 - 0.001;
+    pitch = Math.max(-lim, Math.min(lim, b - Math.PI/2));
+  }
   async function enableGyro(){
     if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
       try {
