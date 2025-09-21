@@ -10,7 +10,8 @@
   #ui{position:fixed;left:12px;top:12px;display:flex;gap:8px;z-index:10;flex-wrap:wrap}
   #ui>*{background:#111a;border:1px solid #333;border-radius:10px;padding:6px 10px;font-size:14px}
   #note{position:fixed;left:12px;bottom:12px;background:#111a;border:1px solid #333;border-radius:10px;padding:8px 10px;z-index:10;max-width:min(92vw,860px)}
-  canvas{display:block;width:100vw;height:100vh}
+  canvas{display:block;width:100vw;height:100vh;touch-action:none;cursor:grab}
+  canvas.dragging{cursor:grabbing}
   button{cursor:pointer}
 </style>
 </head>
@@ -112,6 +113,7 @@
 
   // --- Состояние
   let yaw=0,pitch=0,roll=0,fov=Math.PI/3;
+  const PITCH_LIMIT = Math.PI/2 - 0.001;
   let gyroOn=false, orientHandler=null, prevA=null, yawVel=0;
   const LPF=0.25, HORIZ_SOFT=0.3;
   const gyroBtn=document.getElementById('gyroBtn');
@@ -138,8 +140,7 @@
     yaw+=yawVel;
 
     // ПОЛНЫЙ НАКЛОН ВПЕРЕД/НАЗАД: возвращаем pitch из β
-    const lim = Math.PI/2 - 0.001;
-    pitch = Math.max(-lim, Math.min(lim, b - Math.PI/2));
+    pitch = Math.max(-PITCH_LIMIT, Math.min(PITCH_LIMIT, b - Math.PI/2));
 
     // НАКЛОН ВЛЕВО/ВПРАВО: roll из γ с учётом ориентации экрана
     const ang = ((scrAng%360)+360)%360;
@@ -168,6 +169,43 @@
 
   gyroBtn.addEventListener('click',()=> gyroOn ? disableGyro():enableGyro());
   enableGyro(); // автозапуск
+
+  // --- Pointer controls
+  let drag=false, lastX=0, lastY=0;
+  const DRAG_SPEED = 0.0025;
+
+  function endDrag(e){
+    if(!drag) return;
+    drag=false;
+    cnv.classList.remove('dragging');
+    try{ cnv.releasePointerCapture(e.pointerId); }catch(_){}
+  }
+
+  cnv.addEventListener('pointerdown', e=>{
+    if(e.button!==undefined && e.button!==0) return;
+    drag=true;
+    lastX=e.clientX;
+    lastY=e.clientY;
+    cnv.classList.add('dragging');
+    cnv.setPointerCapture(e.pointerId);
+  });
+
+  cnv.addEventListener('pointermove', e=>{
+    if(!drag) return;
+    const dx=e.clientX-lastX;
+    const dy=e.clientY-lastY;
+    lastX=e.clientX;
+    lastY=e.clientY;
+    yaw+=dx*DRAG_SPEED;
+    pitch=Math.max(-PITCH_LIMIT, Math.min(PITCH_LIMIT, pitch+dy*DRAG_SPEED));
+  });
+
+  cnv.addEventListener('pointerup', endDrag);
+  cnv.addEventListener('pointercancel', endDrag);
+  cnv.addEventListener('lostpointercapture', ()=>{
+    drag=false;
+    cnv.classList.remove('dragging');
+  });
 
   // --- Resize + Render
   function resize(){
