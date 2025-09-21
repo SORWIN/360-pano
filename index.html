@@ -1,1 +1,913 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>360° панорама с управлением взглядом</title>
+    <style>
+      *, *::before, *::after {
+        box-sizing: border-box;
+      }
 
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        background: #000;
+        color: #fff;
+        font-family: "Inter", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+        overscroll-behavior: contain;
+      }
+
+      body {
+        display: flex;
+      }
+
+      #viewer {
+        position: relative;
+        flex: 1;
+        overflow: hidden;
+        background: #000;
+      }
+
+      canvas#pano {
+        display: block;
+        width: 100%;
+        height: 100%;
+        cursor: default;
+        touch-action: none;
+        background: #000;
+      }
+
+      canvas#pano.can-drag {
+        cursor: grab;
+      }
+
+      canvas#pano.dragging {
+        cursor: grabbing;
+      }
+
+      #overlay {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(0, 0, 0, 0.7);
+        backdrop-filter: blur(4px);
+        padding: 24px;
+        transition: opacity 0.3s ease;
+        z-index: 2;
+      }
+
+      #overlay.hidden {
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      #overlay .overlay-box {
+        max-width: min(420px, 90vw);
+        width: 100%;
+        background: rgba(14, 14, 18, 0.85);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 18px;
+        padding: 28px 28px 24px;
+        box-shadow: 0 24px 48px rgba(0, 0, 0, 0.4);
+        text-align: center;
+      }
+
+      #overlay h1 {
+        margin: 0 0 12px;
+        font-size: 1.5rem;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+      }
+
+      #overlay p {
+        margin: 0 0 18px;
+        line-height: 1.45;
+        color: rgba(255, 255, 255, 0.8);
+      }
+
+      #overlay-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        justify-content: center;
+        margin-bottom: 16px;
+      }
+
+      button {
+        border: none;
+        border-radius: 999px;
+        padding: 12px 22px;
+        font-size: 0.95rem;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        cursor: pointer;
+        transition: transform 0.18s ease, box-shadow 0.18s ease, background-color 0.18s ease;
+      }
+
+      button:focus-visible {
+        outline: 2px solid rgba(255, 255, 255, 0.8);
+        outline-offset: 3px;
+      }
+
+      button.primary {
+        background: linear-gradient(135deg, #3a8bff, #8c5eff);
+        color: #fff;
+        box-shadow: 0 14px 30px rgba(77, 125, 255, 0.35);
+      }
+
+      button.primary:disabled {
+        cursor: not-allowed;
+        background: linear-gradient(135deg, rgba(58, 139, 255, 0.4), rgba(140, 94, 255, 0.4));
+        box-shadow: none;
+      }
+
+      button.secondary {
+        background: rgba(255, 255, 255, 0.12);
+        color: #fff;
+      }
+
+      button.secondary:hover {
+        background: rgba(255, 255, 255, 0.18);
+      }
+
+      button.primary:hover:not(:disabled) {
+        transform: translateY(-1px);
+        box-shadow: 0 18px 36px rgba(77, 125, 255, 0.45);
+      }
+
+      #overlay-error {
+        min-height: 1.4em;
+        color: #ff7f7f;
+        font-size: 0.9rem;
+      }
+
+      #status {
+        position: absolute;
+        left: 16px;
+        bottom: 16px;
+        padding: 10px 14px;
+        border-radius: 999px;
+        background: rgba(0, 0, 0, 0.45);
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        color: rgba(255, 255, 255, 0.92);
+        font-size: 0.9rem;
+        line-height: 1.4;
+        white-space: pre-line;
+        pointer-events: none;
+        z-index: 1;
+      }
+
+      #recenter-button {
+        position: absolute;
+        top: env(safe-area-inset-top, 12px);
+        right: 16px;
+        padding: 10px 18px;
+        border-radius: 999px;
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        background: rgba(0, 0, 0, 0.55);
+        color: rgba(255, 255, 255, 0.92);
+        font-weight: 600;
+        font-size: 0.9rem;
+        cursor: pointer;
+        z-index: 1;
+        display: none;
+      }
+
+      #recenter-button:hover {
+        background: rgba(0, 0, 0, 0.7);
+      }
+
+      @media (max-width: 600px) {
+        #overlay .overlay-box {
+          padding: 24px 22px 20px;
+        }
+
+        button {
+          width: 100%;
+        }
+      }
+
+      noscript {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        text-align: center;
+        background: rgba(0, 0, 0, 0.85);
+        color: #fff;
+        z-index: 3;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="viewer">
+      <canvas id="pano" aria-label="Просмотр 360-градусной панорамы"></canvas>
+
+      <div id="overlay" role="dialog" aria-modal="true">
+        <div class="overlay-box">
+          <h1>Управление взглядом через гироскоп</h1>
+          <p id="overlay-message">
+            Нажмите «Разрешить гироскоп», чтобы управлять обзором панорамы поворотами устройства. На iOS появится системное окно с запросом разрешения.
+          </p>
+          <div id="overlay-actions">
+            <button id="enable-gyro" type="button" class="primary">Разрешить гироскоп</button>
+            <button id="pointer-mode" type="button" class="secondary">Продолжить без гироскопа</button>
+          </div>
+          <p id="overlay-error" role="status" aria-live="assertive"></p>
+        </div>
+      </div>
+
+      <button id="recenter-button" type="button" aria-label="Центрировать текущий взгляд">Центр</button>
+      <div id="status" role="status" aria-live="polite">Загрузка панорамы…</div>
+    </div>
+
+    <noscript>
+      Для просмотра панорамы требуется включённый JavaScript.
+    </noscript>
+
+    <script>
+      (function () {
+        const DEG2RAD = Math.PI / 180;
+        const RAD2DEG = 180 / Math.PI;
+        const canvas = document.getElementById('pano');
+        const overlay = document.getElementById('overlay');
+        const overlayMessage = document.getElementById('overlay-message');
+        const overlayError = document.getElementById('overlay-error');
+        const enableButton = document.getElementById('enable-gyro');
+        const pointerButton = document.getElementById('pointer-mode');
+        const status = document.getElementById('status');
+        const recenterButton = document.getElementById('recenter-button');
+
+        const gl = canvas.getContext('webgl', { antialias: true, alpha: false, preserveDrawingBuffer: false });
+
+        if (!gl) {
+          overlayMessage.textContent = 'Ваш браузер не поддерживает WebGL, поэтому панорама не может быть показана.';
+          enableButton.disabled = true;
+          status.textContent = 'WebGL не поддерживается';
+          return;
+        }
+
+        const vertexSource = `
+          attribute vec3 position;
+          attribute vec2 uv;
+          uniform mat4 projectionMatrix;
+          uniform mat4 viewMatrix;
+          varying vec2 vUv;
+
+          void main() {
+            vUv = uv;
+            gl_Position = projectionMatrix * viewMatrix * vec4(position, 1.0);
+          }
+        `;
+
+        const fragmentSource = `
+          precision mediump float;
+          uniform sampler2D panorama;
+          varying vec2 vUv;
+
+          void main() {
+            vec2 sampleUv = vec2(vUv.x, 1.0 - vUv.y);
+            gl_FragColor = texture2D(panorama, sampleUv);
+          }
+        `;
+
+        function createShader(glContext, type, source) {
+          const shader = glContext.createShader(type);
+          glContext.shaderSource(shader, source);
+          glContext.compileShader(shader);
+          if (!glContext.getShaderParameter(shader, glContext.COMPILE_STATUS)) {
+            const info = glContext.getShaderInfoLog(shader);
+            glContext.deleteShader(shader);
+            throw new Error('Не удалось скомпилировать шейдер: ' + info);
+          }
+          return shader;
+        }
+
+        function createProgram(glContext, vertexSrc, fragmentSrc) {
+          const vertexShader = createShader(glContext, glContext.VERTEX_SHADER, vertexSrc);
+          const fragmentShader = createShader(glContext, glContext.FRAGMENT_SHADER, fragmentSrc);
+          const program = glContext.createProgram();
+          glContext.attachShader(program, vertexShader);
+          glContext.attachShader(program, fragmentShader);
+          glContext.linkProgram(program);
+          if (!glContext.getProgramParameter(program, glContext.LINK_STATUS)) {
+            const info = glContext.getProgramInfoLog(program);
+            glContext.deleteProgram(program);
+            throw new Error('Не удалось связать программу WebGL: ' + info);
+          }
+          return program;
+        }
+
+        function createSphere(radius, latSegments, lonSegments) {
+          const positions = [];
+          const uvs = [];
+          const indices = [];
+
+          for (let lat = 0; lat <= latSegments; lat++) {
+            const v = lat / latSegments;
+            const phi = v * Math.PI;
+            for (let lon = 0; lon <= lonSegments; lon++) {
+              const u = lon / lonSegments;
+              const theta = u * Math.PI * 2;
+
+              const x = Math.sin(phi) * Math.cos(theta);
+              const y = Math.cos(phi);
+              const z = Math.sin(phi) * Math.sin(theta);
+
+              // Переворачиваем сферу по оси X, чтобы смотреть изнутри.
+              positions.push(-radius * x, radius * y, radius * z);
+              uvs.push(1 - u, v);
+            }
+          }
+
+          const stride = lonSegments + 1;
+          for (let lat = 0; lat < latSegments; lat++) {
+            for (let lon = 0; lon < lonSegments; lon++) {
+              const current = lat * stride + lon;
+              const next = current + stride;
+
+              indices.push(current, next, current + 1);
+              indices.push(current + 1, next, next + 1);
+            }
+          }
+
+          return {
+            positions: new Float32Array(positions),
+            uvs: new Float32Array(uvs),
+            indices: new Uint16Array(indices),
+          };
+        }
+
+        class Quaternion {
+          constructor(x = 0, y = 0, z = 0, w = 1) {
+            this.x = x;
+            this.y = y;
+            this.z = z;
+            this.w = w;
+          }
+
+          set(x, y, z, w) {
+            this.x = x;
+            this.y = y;
+            this.z = z;
+            this.w = w;
+            return this;
+          }
+
+          copy(quaternion) {
+            this.x = quaternion.x;
+            this.y = quaternion.y;
+            this.z = quaternion.z;
+            this.w = quaternion.w;
+            return this;
+          }
+
+          identity() {
+            return this.set(0, 0, 0, 1);
+          }
+
+          multiply(quaternion) {
+            const x = this.x;
+            const y = this.y;
+            const z = this.z;
+            const w = this.w;
+            const qx = quaternion.x;
+            const qy = quaternion.y;
+            const qz = quaternion.z;
+            const qw = quaternion.w;
+
+            this.x = w * qx + x * qw + y * qz - z * qy;
+            this.y = w * qy - x * qz + y * qw + z * qx;
+            this.z = w * qz + x * qy - y * qx + z * qw;
+            this.w = w * qw - x * qx - y * qy - z * qz;
+            return this;
+          }
+
+          setFromAxisAngle(axis, angle) {
+            const halfAngle = angle / 2;
+            const s = Math.sin(halfAngle);
+            this.x = axis[0] * s;
+            this.y = axis[1] * s;
+            this.z = axis[2] * s;
+            this.w = Math.cos(halfAngle);
+            return this;
+          }
+
+          setFromEulerYXZ(x, y, z) {
+            const c1 = Math.cos(x / 2);
+            const c2 = Math.cos(y / 2);
+            const c3 = Math.cos(z / 2);
+            const s1 = Math.sin(x / 2);
+            const s2 = Math.sin(y / 2);
+            const s3 = Math.sin(z / 2);
+
+            this.x = s1 * c2 * c3 + c1 * s2 * s3;
+            this.y = c1 * s2 * c3 - s1 * c2 * s3;
+            this.z = c1 * c2 * s3 - s1 * s2 * c3;
+            this.w = c1 * c2 * c3 + s1 * s2 * s3;
+            return this;
+          }
+
+          normalize() {
+            const length = Math.hypot(this.x, this.y, this.z, this.w);
+            if (length === 0) {
+              return this.identity();
+            }
+            const inv = 1 / length;
+            this.x *= inv;
+            this.y *= inv;
+            this.z *= inv;
+            this.w *= inv;
+            return this;
+          }
+
+          conjugate() {
+            this.x *= -1;
+            this.y *= -1;
+            this.z *= -1;
+            return this;
+          }
+
+          toMatrix4(target) {
+            const x = this.x;
+            const y = this.y;
+            const z = this.z;
+            const w = this.w;
+            const x2 = x + x;
+            const y2 = y + y;
+            const z2 = z + z;
+            const xx = x * x2;
+            const xy = x * y2;
+            const xz = x * z2;
+            const yy = y * y2;
+            const yz = y * z2;
+            const zz = z * z2;
+            const wx = w * x2;
+            const wy = w * y2;
+            const wz = w * z2;
+
+            target[0] = 1 - (yy + zz);
+            target[1] = xy + wz;
+            target[2] = xz - wy;
+            target[3] = 0;
+
+            target[4] = xy - wz;
+            target[5] = 1 - (xx + zz);
+            target[6] = yz + wx;
+            target[7] = 0;
+
+            target[8] = xz + wy;
+            target[9] = yz - wx;
+            target[10] = 1 - (xx + yy);
+            target[11] = 0;
+
+            target[12] = 0;
+            target[13] = 0;
+            target[14] = 0;
+            target[15] = 1;
+            return target;
+          }
+
+          clone() {
+            return new Quaternion(this.x, this.y, this.z, this.w);
+          }
+        }
+
+        function clamp(value, min, max) {
+          return Math.max(min, Math.min(max, value));
+        }
+
+        function formatAngle(value) {
+          return (Math.round(value * 10) / 10).toFixed(1);
+        }
+
+        const program = createProgram(gl, vertexSource, fragmentSource);
+        gl.useProgram(program);
+
+        const sphere = createSphere(1, 64, 128);
+
+        const positionBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, sphere.positions, gl.STATIC_DRAW);
+
+        const positionLocation = gl.getAttribLocation(program, 'position');
+        gl.enableVertexAttribArray(positionLocation);
+        gl.vertexAttribPointer(positionLocation, 3, gl.FLOAT, false, 0, 0);
+
+        const uvBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, uvBuffer);
+        gl.bufferData(gl.ARRAY_BUFFER, sphere.uvs, gl.STATIC_DRAW);
+
+        const uvLocation = gl.getAttribLocation(program, 'uv');
+        gl.enableVertexAttribArray(uvLocation);
+        gl.vertexAttribPointer(uvLocation, 2, gl.FLOAT, false, 0, 0);
+
+        const indexBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
+        gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, sphere.indices, gl.STATIC_DRAW);
+
+        const projectionLocation = gl.getUniformLocation(program, 'projectionMatrix');
+        const viewLocation = gl.getUniformLocation(program, 'viewMatrix');
+        const textureLocation = gl.getUniformLocation(program, 'panorama');
+
+        const projectionMatrix = new Float32Array(16);
+        const viewMatrix = new Float32Array(16);
+        const tempMatrix = new Float32Array(16);
+
+        gl.uniform1i(textureLocation, 0);
+        gl.activeTexture(gl.TEXTURE0);
+
+        const texture = gl.createTexture();
+        gl.bindTexture(gl.TEXTURE_2D, texture);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 0, 255]));
+
+        let textureLoaded = false;
+        const panoramaImage = new Image();
+        panoramaImage.src = 'panorama_4096x2048.jpg';
+        panoramaImage.onload = function () {
+          gl.bindTexture(gl.TEXTURE_2D, texture);
+          gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+          gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, panoramaImage);
+          gl.generateMipmap(gl.TEXTURE_2D);
+          textureLoaded = true;
+        };
+        panoramaImage.onerror = function () {
+          overlayError.textContent = 'Не удалось загрузить изображение панорамы.';
+        };
+
+        gl.clearColor(0, 0, 0, 1);
+        gl.enable(gl.DEPTH_TEST);
+        gl.depthFunc(gl.LEQUAL);
+        gl.disable(gl.CULL_FACE);
+
+        const orientationQuaternion = new Quaternion();
+        const deviceQuaternion = new Quaternion();
+        const manualQuaternion = new Quaternion();
+        const tempQuaternion = new Quaternion();
+        const axisQuaternion = new Quaternion();
+        const rotationMatrix = new Float32Array(16);
+
+        const zAxis = [0, 0, 1];
+        const q1 = new Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5));
+
+        let orientationMode = 'idle';
+        let latestDeviceOrientation = null;
+        let screenOrientation = getScreenOrientation();
+        let alphaOffset = 0;
+        let alphaOffsetInitialized = false;
+        let deviceOrientationListenersAttached = false;
+
+        let manualYaw = 0;
+        let manualPitch = 0;
+        let manualRoll = 0;
+        let pointerActive = false;
+        let pointerId = null;
+        let lastPointerX = 0;
+        let lastPointerY = 0;
+        let pointerRollMode = false;
+
+        function getScreenOrientation() {
+          if (window.screen && window.screen.orientation && typeof window.screen.orientation.angle === 'number') {
+            return window.screen.orientation.angle;
+          }
+          if (typeof window.orientation === 'number') {
+            return window.orientation;
+          }
+          return 0;
+        }
+
+        function resizeCanvasToDisplaySize() {
+          const ratio = window.devicePixelRatio || 1;
+          const displayWidth = Math.max(1, Math.floor(canvas.clientWidth * ratio));
+          const displayHeight = Math.max(1, Math.floor(canvas.clientHeight * ratio));
+          if (canvas.width !== displayWidth || canvas.height !== displayHeight) {
+            canvas.width = displayWidth;
+            canvas.height = displayHeight;
+            gl.viewport(0, 0, displayWidth, displayHeight);
+            updateProjectionMatrix();
+            gl.uniformMatrix4fv(projectionLocation, false, projectionMatrix);
+          }
+        }
+
+        function updateProjectionMatrix() {
+          const aspect = canvas.height > 0 ? canvas.width / canvas.height : 1;
+          const fov = 75 * DEG2RAD;
+          const near = 0.1;
+          const far = 50;
+          const f = 1 / Math.tan(fov / 2);
+
+          projectionMatrix[0] = f / aspect;
+          projectionMatrix[1] = 0;
+          projectionMatrix[2] = 0;
+          projectionMatrix[3] = 0;
+
+          projectionMatrix[4] = 0;
+          projectionMatrix[5] = f;
+          projectionMatrix[6] = 0;
+          projectionMatrix[7] = 0;
+
+          projectionMatrix[8] = 0;
+          projectionMatrix[9] = 0;
+          projectionMatrix[10] = (far + near) / (near - far);
+          projectionMatrix[11] = -1;
+
+          projectionMatrix[12] = 0;
+          projectionMatrix[13] = 0;
+          projectionMatrix[14] = (2 * far * near) / (near - far);
+          projectionMatrix[15] = 0;
+        }
+
+        function quaternionFromDevice(alpha, beta, gamma, orient) {
+          deviceQuaternion.setFromEulerYXZ(beta, alpha, -gamma);
+          deviceQuaternion.multiply(q1);
+          deviceQuaternion.multiply(axisQuaternion.setFromAxisAngle(zAxis, -orient));
+          return deviceQuaternion.normalize();
+        }
+
+        function updateFromDeviceOrientation() {
+          if (!latestDeviceOrientation) {
+            return false;
+          }
+
+          const { alpha, beta, gamma } = latestDeviceOrientation;
+          if (alpha == null || beta == null || gamma == null) {
+            return false;
+          }
+
+          let alphaRad = alpha * DEG2RAD;
+          if (!alphaOffsetInitialized) {
+            alphaOffset = -alphaRad;
+            alphaOffsetInitialized = true;
+          }
+
+          const betaRad = beta * DEG2RAD;
+          const gammaRad = gamma * DEG2RAD;
+          alphaRad += alphaOffset;
+          const orientRad = screenOrientation * DEG2RAD;
+
+          orientationQuaternion.copy(quaternionFromDevice(alphaRad, betaRad, gammaRad, orientRad));
+          return true;
+        }
+
+        function quaternionToEulerYXZ(quaternion) {
+          quaternion.toMatrix4(rotationMatrix);
+          const m11 = rotationMatrix[0];
+          const m12 = rotationMatrix[4];
+          const m13 = rotationMatrix[8];
+          const m23 = rotationMatrix[9];
+          const m33 = rotationMatrix[10];
+          const m32 = rotationMatrix[6];
+          const m22 = rotationMatrix[5];
+
+          const clampValue = clamp(m13, -1, 1);
+          const y = Math.asin(clampValue);
+          let x;
+          let z;
+
+          if (Math.abs(m13) < 0.9999999) {
+            x = Math.atan2(-m23, m33);
+            z = Math.atan2(-m12, m11);
+          } else {
+            x = Math.atan2(m32, m22);
+            z = 0;
+          }
+
+          return { x, y, z };
+        }
+
+        function updateStatus() {
+          if (!textureLoaded) {
+            status.textContent = 'Загрузка панорамы…';
+            return;
+          }
+
+          if (orientationMode === 'device' && !alphaOffsetInitialized) {
+            status.textContent = 'Ожидаем данные от гироскопа…';
+            return;
+          }
+
+          const { x, y, z } = quaternionToEulerYXZ(orientationQuaternion);
+          const yaw = formatAngle(y * RAD2DEG);
+          const pitch = formatAngle(x * RAD2DEG);
+          const roll = formatAngle(z * RAD2DEG);
+          const modeLabel = orientationMode === 'device' ? 'Гироскоп' : orientationMode === 'manual' ? 'Мышь/тач' : 'Панорама';
+          const extra = orientationMode === 'manual' ? '\nShift + перетаскивание — ролл' : '';
+          status.textContent = `${modeLabel}\nYaw: ${yaw}°\nPitch: ${pitch}°\nRoll: ${roll}°${extra}`;
+        }
+
+        function animate() {
+          resizeCanvasToDisplaySize();
+
+          if (orientationMode === 'device') {
+            updateFromDeviceOrientation();
+          } else if (orientationMode === 'manual') {
+            orientationQuaternion.copy(manualQuaternion.setFromEulerYXZ(manualPitch, manualYaw, manualRoll).normalize());
+          }
+
+          tempQuaternion.copy(orientationQuaternion).conjugate().normalize();
+          tempQuaternion.toMatrix4(viewMatrix);
+          gl.uniformMatrix4fv(viewLocation, false, viewMatrix);
+
+          gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+          if (textureLoaded) {
+            gl.drawElements(gl.TRIANGLES, sphere.indices.length, gl.UNSIGNED_SHORT, 0);
+          }
+
+          updateStatus();
+          requestAnimationFrame(animate);
+        }
+
+        requestAnimationFrame(animate);
+
+        function attachDeviceOrientationListeners() {
+          if (deviceOrientationListenersAttached) {
+            return;
+          }
+          const handler = (event) => {
+            if (event.alpha === null && event.beta === null && event.gamma === null) {
+              return;
+            }
+            latestDeviceOrientation = event;
+          };
+          window.addEventListener('deviceorientation', handler, true);
+          if ('ondeviceorientationabsolute' in window) {
+            window.addEventListener('deviceorientationabsolute', handler, true);
+          }
+          deviceOrientationListenersAttached = true;
+        }
+
+        function setOrientationMode(mode) {
+          if (orientationMode === mode) {
+            return;
+          }
+          orientationMode = mode;
+
+          if (mode === 'manual') {
+            canvas.classList.add('can-drag');
+            recenterButton.style.display = 'none';
+          } else if (mode === 'device') {
+            canvas.classList.remove('can-drag');
+            recenterButton.style.display = 'block';
+          } else {
+            canvas.classList.remove('can-drag');
+            recenterButton.style.display = 'none';
+          }
+
+          if (mode !== 'manual') {
+            pointerActive = false;
+            pointerRollMode = false;
+            canvas.classList.remove('dragging');
+            if (pointerId !== null) {
+              try {
+                canvas.releasePointerCapture(pointerId);
+              } catch (error) {
+                // Игнорируем ошибку если указатель не захвачен.
+              }
+              pointerId = null;
+            }
+          }
+        }
+
+        async function requestDeviceOrientation() {
+          overlayError.textContent = '';
+          if (!window.DeviceOrientationEvent) {
+            overlayError.textContent = 'Гироскоп не поддерживается на этом устройстве.';
+            return;
+          }
+
+          if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+            try {
+              const response = await DeviceOrientationEvent.requestPermission();
+              if (response !== 'granted') {
+                overlayError.textContent = 'Доступ к гироскопу отклонён.';
+                return;
+              }
+            } catch (error) {
+              overlayError.textContent = 'Не удалось запросить доступ к гироскопу.';
+              return;
+            }
+          }
+
+          startDeviceOrientation();
+        }
+
+        function startDeviceOrientation() {
+          overlay.classList.add('hidden');
+          setOrientationMode('device');
+          alphaOffsetInitialized = false;
+          attachDeviceOrientationListeners();
+          status.textContent = 'Ожидаем данные от гироскопа…';
+        }
+
+        function startManualMode() {
+          overlay.classList.add('hidden');
+          setOrientationMode('manual');
+          manualYaw = 0;
+          manualPitch = 0;
+          manualRoll = 0;
+          manualQuaternion.setFromEulerYXZ(0, 0, 0);
+          status.textContent = 'Режим мыши активен. Перетаскивайте для обзора. Shift — ролл.';
+        }
+
+        function handleRecenter() {
+          if (orientationMode !== 'device' || !latestDeviceOrientation) {
+            return;
+          }
+          const { alpha } = latestDeviceOrientation;
+          if (alpha == null) {
+            return;
+          }
+          alphaOffset = -alpha * DEG2RAD;
+          alphaOffsetInitialized = true;
+          updateFromDeviceOrientation();
+        }
+
+        enableButton.addEventListener('click', requestDeviceOrientation);
+        pointerButton.addEventListener('click', startManualMode);
+        recenterButton.addEventListener('click', handleRecenter);
+
+        window.addEventListener('resize', resizeCanvasToDisplaySize);
+        const updateScreenOrientation = () => {
+          screenOrientation = getScreenOrientation();
+        };
+        if (window.screen && window.screen.orientation && typeof window.screen.orientation.addEventListener === 'function') {
+          window.screen.orientation.addEventListener('change', updateScreenOrientation);
+        } else {
+          window.addEventListener('orientationchange', updateScreenOrientation);
+        }
+
+        canvas.addEventListener('pointerdown', (event) => {
+          if (orientationMode !== 'manual') {
+            return;
+          }
+          pointerActive = true;
+          pointerId = event.pointerId;
+          lastPointerX = event.clientX;
+          lastPointerY = event.clientY;
+          pointerRollMode = event.button === 2 || event.ctrlKey;
+          canvas.setPointerCapture(pointerId);
+          canvas.classList.add('dragging');
+          event.preventDefault();
+        });
+
+        canvas.addEventListener('pointermove', (event) => {
+          if (orientationMode !== 'manual') {
+            return;
+          }
+          if (!pointerActive || event.pointerId !== pointerId) {
+            return;
+          }
+          const dx = event.clientX - lastPointerX;
+          const dy = event.clientY - lastPointerY;
+          lastPointerX = event.clientX;
+          lastPointerY = event.clientY;
+
+          if (event.shiftKey || pointerRollMode) {
+            manualRoll += dx * 0.0035;
+          } else {
+            manualYaw -= dx * 0.0045;
+            manualPitch -= dy * 0.0045;
+            manualPitch = clamp(manualPitch, -Math.PI / 2 + 0.01, Math.PI / 2 - 0.01);
+          }
+          event.preventDefault();
+        });
+
+        function releasePointer(event) {
+          if (orientationMode !== 'manual') {
+            return;
+          }
+          if (event.pointerId !== pointerId) {
+            return;
+          }
+          pointerActive = false;
+          pointerRollMode = false;
+          canvas.classList.remove('dragging');
+          canvas.releasePointerCapture(pointerId);
+        }
+
+        canvas.addEventListener('pointerup', releasePointer);
+        canvas.addEventListener('pointercancel', releasePointer);
+        canvas.addEventListener('contextmenu', (event) => {
+          if (orientationMode === 'manual') {
+            event.preventDefault();
+          }
+        });
+
+        if (!('DeviceOrientationEvent' in window)) {
+          overlayMessage.textContent = 'На этом устройстве недоступны данные гироскопа. Вы можете управлять обзором с помощью мыши.';
+          enableButton.disabled = true;
+        }
+      })();
+    </script>
+  </body>
+</html>
