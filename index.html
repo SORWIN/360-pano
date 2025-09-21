@@ -569,12 +569,10 @@
 
         let manualYaw = 0;
         let manualPitch = 0;
-        let manualRoll = 0;
         let pointerActive = false;
         let pointerId = null;
         let lastPointerX = 0;
         let lastPointerY = 0;
-        let pointerRollMode = false;
 
         function getScreenOrientation() {
           if (window.screen && window.screen.orientation && typeof window.screen.orientation.angle === 'number') {
@@ -656,6 +654,7 @@
           const orientRad = screenOrientation * DEG2RAD;
 
           orientationQuaternion.copy(quaternionFromDevice(alphaRad, betaRad, gammaRad, orientRad));
+          removeRoll(orientationQuaternion);
           return true;
         }
 
@@ -685,6 +684,11 @@
           return { x, y, z };
         }
 
+        function removeRoll(quaternion) {
+          const { x, y } = quaternionToEulerYXZ(quaternion);
+          return quaternion.setFromEulerYXZ(x, y, 0).normalize();
+        }
+
         function updateStatus() {
           if (!textureLoaded) {
             status.textContent = 'Загрузка панорамы…';
@@ -696,13 +700,11 @@
             return;
           }
 
-          const { x, y, z } = quaternionToEulerYXZ(orientationQuaternion);
+          const { x, y } = quaternionToEulerYXZ(orientationQuaternion);
           const yaw = formatAngle(y * RAD2DEG);
           const pitch = formatAngle(x * RAD2DEG);
-          const roll = formatAngle(z * RAD2DEG);
           const modeLabel = orientationMode === 'device' ? 'Гироскоп' : orientationMode === 'manual' ? 'Мышь/тач' : 'Панорама';
-          const extra = orientationMode === 'manual' ? '\nShift + перетаскивание — ролл' : '';
-          status.textContent = `${modeLabel}\nYaw: ${yaw}°\nPitch: ${pitch}°\nRoll: ${roll}°${extra}`;
+          status.textContent = `${modeLabel}\nYaw: ${yaw}°\nPitch: ${pitch}°`;
         }
 
         function animate() {
@@ -711,7 +713,7 @@
           if (orientationMode === 'device') {
             updateFromDeviceOrientation();
           } else if (orientationMode === 'manual') {
-            orientationQuaternion.copy(manualQuaternion.setFromEulerYXZ(manualPitch, manualYaw, manualRoll).normalize());
+            orientationQuaternion.copy(manualQuaternion.setFromEulerYXZ(manualPitch, manualYaw, 0).normalize());
           }
 
           tempQuaternion.copy(orientationQuaternion).conjugate().normalize();
@@ -765,7 +767,6 @@
 
           if (mode !== 'manual') {
             pointerActive = false;
-            pointerRollMode = false;
             canvas.classList.remove('dragging');
             if (pointerId !== null) {
               try {
@@ -814,9 +815,8 @@
           setOrientationMode('manual');
           manualYaw = 0;
           manualPitch = 0;
-          manualRoll = 0;
           manualQuaternion.setFromEulerYXZ(0, 0, 0);
-          status.textContent = 'Режим мыши активен. Перетаскивайте для обзора. Shift — ролл.';
+          status.textContent = 'Режим мыши активен. Перетаскивайте для обзора.';
         }
 
         function handleRecenter() {
@@ -854,7 +854,6 @@
           pointerId = event.pointerId;
           lastPointerX = event.clientX;
           lastPointerY = event.clientY;
-          pointerRollMode = event.button === 2 || event.ctrlKey;
           canvas.setPointerCapture(pointerId);
           canvas.classList.add('dragging');
           event.preventDefault();
@@ -872,13 +871,9 @@
           lastPointerX = event.clientX;
           lastPointerY = event.clientY;
 
-          if (event.shiftKey || pointerRollMode) {
-            manualRoll += dx * 0.0035;
-          } else {
-            manualYaw -= dx * 0.0045;
-            manualPitch -= dy * 0.0045;
-            manualPitch = clamp(manualPitch, -Math.PI / 2 + 0.01, Math.PI / 2 - 0.01);
-          }
+          manualYaw -= dx * 0.0045;
+          manualPitch -= dy * 0.0045;
+          manualPitch = clamp(manualPitch, -Math.PI / 2 + 0.01, Math.PI / 2 - 0.01);
           event.preventDefault();
         });
 
@@ -890,7 +885,6 @@
             return;
           }
           pointerActive = false;
-          pointerRollMode = false;
           canvas.classList.remove('dragging');
           canvas.releasePointerCapture(pointerId);
         }
