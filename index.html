@@ -7,10 +7,11 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@photo-sphere-viewer/core@5.14.0/index.css">
   <style>
     html,body,#viewer{height:100%;margin:0;background:#111}
-    .gyro-off { opacity: 0.4; }   /* тусклый */
-    .gyro-on  { opacity: 1;   }   /* яркий */
+    .gyro-off{opacity:.4}.gyro-on{opacity:1}
+    /* прозрачный блокировщик тача при включённом гироскопе */
+    #touchBlocker{position:fixed;inset:0;pointer-events:none}
+    #touchBlocker.block{pointer-events:auto}
   </style>
-
   <script type="importmap">
   {"imports":{
     "three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
@@ -21,76 +22,62 @@
 </head>
 <body>
   <div id="viewer"></div>
+  <div id="touchBlocker" aria-hidden="true"></div>
 
   <script type="module">
     import { Viewer } from "@photo-sphere-viewer/core";
     import { GyroscopePlugin } from "@photo-sphere-viewer/gyroscope-plugin";
 
-    let gyroActive = false;
-    let gyroLikely = false;
+    let gyroActive=false, gyroLikely=false;
     let viewer, gyro, gyroBtn;
+    const blocker = document.getElementById('touchBlocker');
 
-    // Проверка наличия rotationRate
     window.addEventListener('devicemotion', function detect(e){
-      const rr = e.rotationRate;
-      if (rr && (rr.alpha || rr.beta || rr.gamma)) gyroLikely = true;
-      window.removeEventListener('devicemotion', detect);
-      init();
-    }, { once:true });
+      const r=e.rotationRate; if(r&&(r.alpha||r.beta||r.gamma)) gyroLikely=true;
+      window.removeEventListener('devicemotion', detect); init();
+    },{once:true});
 
-    function navbarWith(){
-      return [
-        'zoom',
-        { id:'gyro-toggle', title:'Гироскоп вкл/выкл', className:'psv-navbar__button', content:'Гироскоп вкл/выкл', onClick:toggleGyro },
-        'fullscreen'
-      ];
-    }
+    function navbar(){return [
+      'zoom',
+      {id:'gyro-toggle',title:'Гироскоп вкл/выкл',className:'psv-navbar__button',content:'Гироскоп вкл/выкл',onClick:toggleGyro},
+      'fullscreen'
+    ]}
 
     async function init(){
-      viewer = new Viewer({
-        container: document.getElementById('viewer'),
-        panorama: 'panorama_4096x2048.jpg',
-        navbar: navbarWith(),
-        plugins: [GyroscopePlugin],
+      viewer=new Viewer({
+        container:document.getElementById('viewer'),
+        panorama:'panorama_4096x2048.jpg',
+        navbar:navbar(),
+        // разрешаем одиночный палец всегда
+        touchmoveTwoFingers:false,
+        mousewheel:true,
       });
-
-      gyro = viewer.getPlugin(GyroscopePlugin);
-      gyroBtn = viewer.navbar.getButton('gyro-toggle').button;
-
-      if (gyroLikely) enableGyro(); else updateStyle();
+      gyro=viewer.getPlugin(GyroscopePlugin);
+      gyroBtn=viewer.navbar.getButton('gyro-toggle').button;
+      if(gyroLikely) enableGyro(); else updateStyle();
     }
 
     async function enableGyro(){
-      try { if (typeof DeviceMotionEvent?.requestPermission === 'function') await DeviceMotionEvent.requestPermission(); } catch {}
-      try { if (typeof DeviceOrientationEvent?.requestPermission === 'function') await DeviceOrientationEvent.requestPermission(); } catch {}
-      try { await gyro.start(); gyroActive = true; } catch {}
-      // блокируем тач при активном гироскопе
-      viewer.setOption('mousewheel', false);
-      viewer.setOption('touchmoveTwoFingers', false);
-      viewer.setOption('mousemove', false);
+      try{ if(typeof DeviceMotionEvent?.requestPermission==='function') await DeviceMotionEvent.requestPermission(); }catch{}
+      try{ if(typeof DeviceOrientationEvent?.requestPermission==='function') await DeviceOrientationEvent.requestPermission(); }catch{}
+      try{ await gyro.start(); gyroActive=true; }catch{}
+      // блокируем любой тач поверх вьюера
+      blocker.classList.add('block');
       updateStyle();
     }
 
     function disableGyro(){
-      try { gyro.stop(); } catch {}
-      gyroActive = false;
-      // возвращаем управление тачем
-      viewer.setOption('mousewheel', true);
-      viewer.setOption('touchmoveTwoFingers', true);
-      viewer.setOption('mousemove', true);
+      try{ gyro.stop(); }catch{}
+      gyroActive=false;
+      blocker.classList.remove('block'); // возвращаем тач
       updateStyle();
     }
 
-    function toggleGyro(){ gyroActive ? disableGyro() : enableGyro(); }
+    function toggleGyro(){ gyroActive?disableGyro():enableGyro(); }
 
     function updateStyle(){
-      if (gyroActive) {
-        gyroBtn.classList.add('gyro-on');
-        gyroBtn.classList.remove('gyro-off');
-      } else {
-        gyroBtn.classList.add('gyro-off');
-        gyroBtn.classList.remove('gyro-on');
-      }
+      if(gyroActive){ gyroBtn.classList.add('gyro-on'); gyroBtn.classList.remove('gyro-off'); }
+      else{ gyroBtn.classList.add('gyro-off'); gyroBtn.classList.remove('gyro-on'); }
     }
   </script>
 </body>
