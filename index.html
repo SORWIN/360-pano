@@ -4,22 +4,21 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>360 панорама</title>
-  <link rel="stylesheet" href="./node_modules/@photo-sphere-viewer/core/index.css">
-  <style>html,body,#viewer{height:100%;margin:0;background:#111;color:#ddd}</style>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@photo-sphere-viewer/core@5.14.3/index.css">
+  <style>html,body,#viewer{height:100%;margin:0;background:#111}</style>
 
-  <!-- Локальные пути для модулей -->
   <script type="importmap">
   {
     "imports": {
-      "three": "./node_modules/three/build/three.module.js",
-      "@photo-sphere-viewer/core": "./node_modules/@photo-sphere-viewer/core/index.module.js",
-      "@photo-sphere-viewer/gyroscope-plugin": "./node_modules/@photo-sphere-viewer/gyroscope-plugin/index.module.js"
+      "three": "https://cdn.jsdelivr.net/npm/three@0.183.0/build/three.module.js",
+      "@photo-sphere-viewer/core": "https://cdn.jsdelivr.net/npm/@photo-sphere-viewer/core@5.14.3/dist/photo-sphere-viewer.module.js",
+      "@photo-sphere-viewer/gyroscope-plugin": "https://cdn.jsdelivr.net/npm/@photo-sphere-viewer/gyroscope-plugin@5.14.3/dist/index.module.js"
     }
   }
   </script>
 </head>
 <body>
-  <div id="viewer">Загрузка…</div>
+  <div id="viewer"></div>
 
   <script type="module">
     import { Viewer } from "@photo-sphere-viewer/core";
@@ -35,10 +34,14 @@
     const gyro = viewer.getPlugin(GyroscopePlugin);
 
     document.body.addEventListener('click', async () => {
-      if (typeof DeviceMotionEvent?.requestPermission === 'function') { try { await DeviceMotionEvent.requestPermission(); } catch {} }
-      if (typeof DeviceOrientationEvent?.requestPermission === 'function') { try { await DeviceOrientationEvent.requestPermission(); } catch {} }
+      if (typeof DeviceMotionEvent?.requestPermission === 'function') {
+        try { await DeviceMotionEvent.requestPermission(); } catch {}
+      }
+      if (typeof DeviceOrientationEvent?.requestPermission === 'function') {
+        try { await DeviceOrientationEvent.requestPermission(); } catch {}
+      }
       try { await gyro.start(); } catch(e){ console.log(e); }
-    }, { once:true });
+    }, {once:true});
   </script>
 </body>
 </html>
