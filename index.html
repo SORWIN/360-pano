@@ -2,65 +2,44 @@
 <html lang="ru">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>360 панорама</title>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/photo-sphere-viewer@5/dist/photo-sphere-viewer.css">
-  <style>
-    html,body,#viewer{height:100%;margin:0;}
-    #ui{position:fixed;inset:auto 1rem 1rem 1rem;display:flex;gap:.5rem;justify-content:center;pointer-events:none}
-    #ui > *{pointer-events:auto}
-    button{padding:.6rem 1rem;border:0;border-radius:.6rem;font:600 14px system-ui,Arial}
-  </style>
+  <link rel="stylesheet" href="https://unpkg.com/@photo-sphere-viewer/core@5.14.3/index.css">
+  <style>html,body,#viewer{height:100%;margin:0;background:#111}</style>
 </head>
 <body>
   <div id="viewer"></div>
-  <div id="ui">
-    <button id="gyroBtn">Включить датчики</button>
-    <button id="resetBtn">Сброс взгляда</button>
-  </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/uevent@2/browser.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/photo-sphere-viewer@5/dist/photo-sphere-viewer.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@photo-sphere-viewer/gyroscope-plugin/dist/index.min.js"></script>
-  <script>
-    const viewer = new PhotoSphereViewer.Viewer({
-      container: '#viewer',
-      panorama: 'panorama_4096x2048.jpg', // кладёшь файл рядом с index.html
-      defaultYaw: 0,
-      defaultPitch: 0,
-      mousewheel: false,
-      touchmoveTwoFingers: true,
-      navbar: ['zoom','fullscreen'],
-      plugins: [ PhotoSphereViewer.GyroscopePlugin ],
-    });
-
-    const gyro = viewer.getPlugin(PhotoSphereViewer.GyroscopePlugin);
-
-    async function requestSensorPerms() {
-      const needDM = typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function';
-      const needDO = typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function';
-      try {
-        if (needDM) await DeviceMotionEvent.requestPermission();
-      } catch(e){}
-      try {
-        if (needDO) await DeviceOrientationEvent.requestPermission();
-      } catch(e){}
+  <script type="importmap">
+    {
+      "imports": {
+        "@photo-sphere-viewer/core": "https://unpkg.com/@photo-sphere-viewer/core@5.14.3/dist/photo-sphere-viewer.module.js",
+        "@photo-sphere-viewer/gyroscope-plugin": "https://unpkg.com/@photo-sphere-viewer/gyroscope-plugin@5.14.3/dist/index.module.js"
+      }
     }
+  </script>
 
-    document.getElementById('gyroBtn').addEventListener('click', async () => {
-      await requestSensorPerms();
+  <script type="module">
+    import { Viewer } from "@photo-sphere-viewer/core";
+    import { GyroscopePlugin } from "@photo-sphere-viewer/gyroscope-plugin";
+
+    const viewer = new Viewer({
+      container: document.getElementById('viewer'),
+      panorama: 'panorama_4096x2048.jpg',
+      plugins: [GyroscopePlugin],
+    });
+
+    const gyro = viewer.getPlugin(GyroscopePlugin);
+
+    document.body.addEventListener('click', async () => {
+      if (typeof DeviceMotionEvent?.requestPermission === 'function') {
+        try { await DeviceMotionEvent.requestPermission(); } catch {}
+      }
+      if (typeof DeviceOrientationEvent?.requestPermission === 'function') {
+        try { await DeviceOrientationEvent.requestPermission(); } catch {}
+      }
       try { await gyro.start(); } catch(e) { console.error(e); }
-    });
-
-    document.getElementById('resetBtn').addEventListener('click', () => {
-      viewer.rotate({ yaw: 0, pitch: 0 }, 300);
-    });
-
-    // автозапуск в Android/Chrome, если разрешения не нужны
-    document.addEventListener('visibilitychange', () => {
-      if (!document.hidden) gyro.start().catch(()=>{});
-    });
+    }, {once:true});
   </script>
 </body>
 </html>
