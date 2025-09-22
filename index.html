@@ -30,6 +30,12 @@
     let gyroLikely = false;
     let viewer, gyro, gyroBtn;
 
+    // читаем параметр ?img=
+    const params = new URLSearchParams(location.search);
+    let panoFile = params.get('img') || 'panorama_4096x2048.jpg';
+    panoFile = panoFile.split('/').pop(); // не даём уйти из каталога
+    if (!/\.(jpe?g|png|webp)$/i.test(panoFile)) panoFile = 'panorama_4096x2048.jpg';
+
     // Проверка наличия rotationRate
     window.addEventListener('devicemotion', function detect(e){
       const rr = e.rotationRate;
@@ -49,7 +55,7 @@
     async function init(){
       viewer = new Viewer({
         container: document.getElementById('viewer'),
-        panorama: 'panorama_4096x2048.jpg',
+        panorama: panoFile,
         navbar: navbarWith(),
         plugins: [GyroscopePlugin],
       });
