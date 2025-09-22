@@ -1,1 +1,66 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>360 панорама</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/photo-sphere-viewer@5/dist/photo-sphere-viewer.css">
+  <style>
+    html,body,#viewer{height:100%;margin:0;}
+    #ui{position:fixed;inset:auto 1rem 1rem 1rem;display:flex;gap:.5rem;justify-content:center;pointer-events:none}
+    #ui > *{pointer-events:auto}
+    button{padding:.6rem 1rem;border:0;border-radius:.6rem;font:600 14px system-ui,Arial}
+  </style>
+</head>
+<body>
+  <div id="viewer"></div>
+  <div id="ui">
+    <button id="gyroBtn">Включить датчики</button>
+    <button id="resetBtn">Сброс взгляда</button>
+  </div>
 
+  <script src="https://cdn.jsdelivr.net/npm/uevent@2/browser.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/photo-sphere-viewer@5/dist/photo-sphere-viewer.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@photo-sphere-viewer/gyroscope-plugin/dist/index.min.js"></script>
+  <script>
+    const viewer = new PhotoSphereViewer.Viewer({
+      container: '#viewer',
+      panorama: 'panorama_4096x2048.jpg', // кладёшь файл рядом с index.html
+      defaultYaw: 0,
+      defaultPitch: 0,
+      mousewheel: false,
+      touchmoveTwoFingers: true,
+      navbar: ['zoom','fullscreen'],
+      plugins: [ PhotoSphereViewer.GyroscopePlugin ],
+    });
+
+    const gyro = viewer.getPlugin(PhotoSphereViewer.GyroscopePlugin);
+
+    async function requestSensorPerms() {
+      const needDM = typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function';
+      const needDO = typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function';
+      try {
+        if (needDM) await DeviceMotionEvent.requestPermission();
+      } catch(e){}
+      try {
+        if (needDO) await DeviceOrientationEvent.requestPermission();
+      } catch(e){}
+    }
+
+    document.getElementById('gyroBtn').addEventListener('click', async () => {
+      await requestSensorPerms();
+      try { await gyro.start(); } catch(e) { console.error(e); }
+    });
+
+    document.getElementById('resetBtn').addEventListener('click', () => {
+      viewer.rotate({ yaw: 0, pitch: 0 }, 300);
+    });
+
+    // автозапуск в Android/Chrome, если разрешения не нужны
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) gyro.start().catch(()=>{});
+    });
+  </script>
+</body>
+</html>
