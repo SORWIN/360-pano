@@ -6,14 +6,9 @@
   <title>360 панорама</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@photo-sphere-viewer/core@5.14.0/index.css">
   <style>
-    html,body{height:100%;margin:0;background:#111}
-    #viewer{position:relative;height:100%}
-    /* прозрачный блокировщик тача поверх канвы, но под navbar */
-    #touchBlocker{position:absolute;inset:0;pointer-events:none;z-index:5}
-    #touchBlocker.block{pointer-events:auto}
-    .psv-navbar{z-index:10 !important}
-    .gyro-off{opacity:.4}
-    .gyro-on{opacity:1}
+    html,body,#viewer{height:100%;margin:0;background:#111}
+    .gyro-off { opacity: 0.4; }   /* тусклый */
+    .gyro-on  { opacity: 1;   }   /* яркий */
   </style>
 
   <script type="importmap">
@@ -25,32 +20,25 @@
   </script>
 </head>
 <body>
-  <div id="viewer">
-    <div id="touchBlocker" aria-hidden="true"></div>
-  </div>
+  <div id="viewer"></div>
 
   <script type="module">
     import { Viewer } from "@photo-sphere-viewer/core";
     import { GyroscopePlugin } from "@photo-sphere-viewer/gyroscope-plugin";
 
-    const viewerEl = document.getElementById('viewer');
-    const blocker  = document.getElementById('touchBlocker');
-
-    let gyroActive=false, gyroLikely=false;
+    let gyroActive = false;
+    let gyroLikely = false;
     let viewer, gyro, gyroBtn;
 
-    // детект "настоящего" gyro
+    // Проверка наличия rotationRate
     window.addEventListener('devicemotion', function detect(e){
-      const r=e.rotationRate; if(r&&(r.alpha||r.beta||r.gamma)) gyroLikely=true;
-      window.removeEventListener('devicemotion', detect); init();
-    }, {once:true});
+      const rr = e.rotationRate;
+      if (rr && (rr.alpha || rr.beta || rr.gamma)) gyroLikely = true;
+      window.removeEventListener('devicemotion', detect);
+      init();
+    }, { once:true });
 
-    function needsPerms(){
-      return (typeof DeviceMotionEvent?.requestPermission==='function') ||
-             (typeof DeviceOrientationEvent?.requestPermission==='function');
-    }
-
-    function navbar(){
+    function navbarWith(){
       return [
         'zoom',
         { id:'gyro-toggle', title:'Гироскоп вкл/выкл', className:'psv-navbar__button', content:'Гироскоп вкл/выкл', onClick:toggleGyro },
@@ -59,53 +47,50 @@
     }
 
     async function init(){
-      viewer=new Viewer({
-        container: viewerEl,
+      viewer = new Viewer({
+        container: document.getElementById('viewer'),
         panorama: 'panorama_4096x2048.jpg',
-        navbar: navbar(),
-        touchmoveTwoFingers: false, // разрешаем 1 палец
-        mousewheel: true,
+        navbar: navbarWith(),
+        plugins: [GyroscopePlugin],
       });
+
       gyro = viewer.getPlugin(GyroscopePlugin);
       gyroBtn = viewer.navbar.getButton('gyro-toggle').button;
 
-      // автостарт только если разрешения не нужны
-      if (gyroLikely && !needsPerms()) await enableGyro();
-      updateStyle();
-
-      // если гироскоп включён — держим блокировку тача
-      viewerEl.addEventListener('pointerdown', ()=>{ if(gyroActive) blocker.classList.add('block'); }, {passive:true});
+      if (gyroLikely) enableGyro(); else updateStyle();
     }
 
     async function enableGyro(){
-      // разрешения (если требуются) запрашиваются только по клику пользователя
-      if (needsPerms()) {
-        try { if (typeof DeviceMotionEvent?.requestPermission==='function') await DeviceMotionEvent.requestPermission(); } catch{}
-        try { if (typeof DeviceOrientationEvent?.requestPermission==='function') await DeviceOrientationEvent.requestPermission(); } catch{}
-      }
-      try {
-        await gyro.start();
-        gyroActive = true;
-        blocker.classList.add('block'); // блокируем тач только после успешного старта
-      } catch(e) {
-        gyroActive = false;
-        blocker.classList.remove('block');
-      }
+      try { if (typeof DeviceMotionEvent?.requestPermission === 'function') await DeviceMotionEvent.requestPermission(); } catch {}
+      try { if (typeof DeviceOrientationEvent?.requestPermission === 'function') await DeviceOrientationEvent.requestPermission(); } catch {}
+      try { await gyro.start(); gyroActive = true; } catch {}
+      // блокируем тач при активном гироскопе
+      viewer.setOption('mousewheel', false);
+      viewer.setOption('touchmoveTwoFingers', false);
+      viewer.setOption('mousemove', false);
       updateStyle();
     }
 
     function disableGyro(){
-      try { gyro.stop(); } catch{}
+      try { gyro.stop(); } catch {}
       gyroActive = false;
-      blocker.classList.remove('block'); // возвращаем тач
+      // возвращаем управление тачем
+      viewer.setOption('mousewheel', true);
+      viewer.setOption('touchmoveTwoFingers', true);
+      viewer.setOption('mousemove', true);
       updateStyle();
     }
 
     function toggleGyro(){ gyroActive ? disableGyro() : enableGyro(); }
 
     function updateStyle(){
-      if (gyroActive) { gyroBtn.classList.add('gyro-on');  gyroBtn.classList.remove('gyro-off'); }
-      else            { gyroBtn.classList.add('gyro-off'); gyroBtn.classList.remove('gyro-on');  }
+      if (gyroActive) {
+        gyroBtn.classList.add('gyro-on');
+        gyroBtn.classList.remove('gyro-off');
+      } else {
+        gyroBtn.classList.add('gyro-off');
+        gyroBtn.classList.remove('gyro-on');
+      }
     }
   </script>
 </body>
