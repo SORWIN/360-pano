@@ -5,7 +5,11 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>360 панорама</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@photo-sphere-viewer/core@5.14.0/index.css">
-  <style>html,body,#viewer{height:100%;margin:0;background:#111}</style>
+  <style>
+    html,body,#viewer{height:100%;margin:0;background:#111}
+    .gyro-off { opacity: 0.4; }   /* тусклый вид */
+    .gyro-on  { opacity: 1;   }   /* яркий белый */
+  </style>
 
   <script type="importmap">
   {"imports":{
@@ -24,8 +28,9 @@
 
     let gyroActive = false;
     let gyroLikely = false;
+    let viewer, gyro, gyroBtn;
 
-    // Оцениваем наличие реального gyro по rotationRate
+    // Проверяем rotationRate для оценки "реального" гироскопа
     window.addEventListener('devicemotion', function detect(e){
       const rr = e.rotationRate;
       if (rr && (rr.alpha || rr.beta || rr.gamma)) gyroLikely = true;
@@ -33,56 +38,56 @@
       init();
     }, { once:true });
 
-    function navbarWith(label){
+    function navbarWith(){
       return [
         'zoom',
-        { id:'gyro-toggle', title:label, className:'psv-navbar__button', content:label, onClick:toggleGyro },
+        { id:'gyro-toggle', title:'Гироскоп включён', className:'psv-navbar__button', content:'Гироскоп включён', onClick:toggleGyro },
         'fullscreen'
       ];
     }
-
-    let viewer, gyro, gyroBtn;
 
     async function init(){
       viewer = new Viewer({
         container: document.getElementById('viewer'),
         panorama: 'panorama_4096x2048.jpg',
-        navbar: navbarWith(gyroLikely ? 'Гироскоп выключен' : 'Гироскоп выключен'),
+        navbar: navbarWith(),
         plugins: [GyroscopePlugin],
       });
 
       gyro = viewer.getPlugin(GyroscopePlugin);
-      gyroBtn = viewer.navbar.getButton('gyro-toggle');
+      gyroBtn = viewer.navbar.getButton('gyro-toggle').button;
 
-      // Не давать тачу «выключать» гироскоп: после любого жеста перезапускаем, если режим должен быть включён.
-      const keepGyro = () => { if (gyroActive) { gyro.start().catch(()=>{}); updateLabel(); } };
+      // не даём тачу выключать гироскоп
+      const keepGyro = () => { if (gyroActive) { gyro.start().catch(()=>{}); updateStyle(); } };
       const c = viewer.container;
       ['pointerdown','pointerup','pointercancel','touchstart','touchend','wheel'].forEach(ev => c.addEventListener(ev, keepGyro, {passive:true}));
 
-      if (gyroLikely) enableGyro(); // у «настоящего» включаем по умолчанию
-      else updateLabel();           // иначе показываем корректную подпись
+      if (gyroLikely) enableGyro(); else updateStyle();
     }
 
     async function enableGyro(){
-      // Разрешения для iOS/некоторых Android
       try { if (typeof DeviceMotionEvent?.requestPermission === 'function') await DeviceMotionEvent.requestPermission(); } catch {}
       try { if (typeof DeviceOrientationEvent?.requestPermission === 'function') await DeviceOrientationEvent.requestPermission(); } catch {}
       try { await gyro.start(); gyroActive = true; } catch {}
-      updateLabel();
+      updateStyle();
     }
 
     function disableGyro(){
       try { gyro.stop(); } catch {}
       gyroActive = false;
-      updateLabel();
+      updateStyle();
     }
 
     function toggleGyro(){ gyroActive ? disableGyro() : enableGyro(); }
 
-    function updateLabel(){
-      const label = gyroActive ? 'Гироскоп включён' : 'Гироскоп выключен';
-      gyroBtn.button.title = label;
-      gyroBtn.button.innerText = label;
+    function updateStyle(){
+      if (gyroActive) {
+        gyroBtn.classList.add('gyro-on');
+        gyroBtn.classList.remove('gyro-off');
+      } else {
+        gyroBtn.classList.add('gyro-off');
+        gyroBtn.classList.remove('gyro-on');
+      }
     }
   </script>
 </body>
