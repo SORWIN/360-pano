@@ -7,8 +7,8 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@photo-sphere-viewer/core@5.14.0/index.css">
   <style>
     html,body,#viewer{height:100%;margin:0;background:#111}
-    .gyro-off { opacity: 0.4; }   /* тусклый вид */
-    .gyro-on  { opacity: 1;   }   /* яркий белый */
+    .gyro-off { opacity: 0.4; }   /* тусклый */
+    .gyro-on  { opacity: 1;   }   /* яркий */
   </style>
 
   <script type="importmap">
@@ -30,7 +30,7 @@
     let gyroLikely = false;
     let viewer, gyro, gyroBtn;
 
-    // Проверяем rotationRate для оценки "реального" гироскопа
+    // Проверка наличия rotationRate
     window.addEventListener('devicemotion', function detect(e){
       const rr = e.rotationRate;
       if (rr && (rr.alpha || rr.beta || rr.gamma)) gyroLikely = true;
@@ -41,7 +41,7 @@
     function navbarWith(){
       return [
         'zoom',
-        { id:'gyro-toggle', title:'Гироскоп включён', className:'psv-navbar__button', content:'Гироскоп включён', onClick:toggleGyro },
+        { id:'gyro-toggle', title:'Гироскоп вкл/выкл', className:'psv-navbar__button', content:'Гироскоп вкл/выкл', onClick:toggleGyro },
         'fullscreen'
       ];
     }
@@ -57,11 +57,6 @@
       gyro = viewer.getPlugin(GyroscopePlugin);
       gyroBtn = viewer.navbar.getButton('gyro-toggle').button;
 
-      // не даём тачу выключать гироскоп
-      const keepGyro = () => { if (gyroActive) { gyro.start().catch(()=>{}); updateStyle(); } };
-      const c = viewer.container;
-      ['pointerdown','pointerup','pointercancel','touchstart','touchend','wheel'].forEach(ev => c.addEventListener(ev, keepGyro, {passive:true}));
-
       if (gyroLikely) enableGyro(); else updateStyle();
     }
 
@@ -69,12 +64,20 @@
       try { if (typeof DeviceMotionEvent?.requestPermission === 'function') await DeviceMotionEvent.requestPermission(); } catch {}
       try { if (typeof DeviceOrientationEvent?.requestPermission === 'function') await DeviceOrientationEvent.requestPermission(); } catch {}
       try { await gyro.start(); gyroActive = true; } catch {}
+      // блокируем тач при активном гироскопе
+      viewer.setOption('mousewheel', false);
+      viewer.setOption('touchmoveTwoFingers', false);
+      viewer.setOption('mousemove', false);
       updateStyle();
     }
 
     function disableGyro(){
       try { gyro.stop(); } catch {}
       gyroActive = false;
+      // возвращаем управление тачем
+      viewer.setOption('mousewheel', true);
+      viewer.setOption('touchmoveTwoFingers', true);
+      viewer.setOption('mousemove', true);
       updateStyle();
     }
 
