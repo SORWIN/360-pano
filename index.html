@@ -4,20 +4,22 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>360 панорама</title>
-  <link rel="stylesheet" href="https://unpkg.com/@photo-sphere-viewer/core@5.14.3/index.css">
-  <style>html,body,#viewer{height:100%;margin:0;background:#111}</style>
+  <link rel="stylesheet" href="./node_modules/@photo-sphere-viewer/core/index.css">
+  <style>html,body,#viewer{height:100%;margin:0;background:#111;color:#ddd}</style>
+
+  <!-- Локальные пути для модулей -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "./node_modules/three/build/three.module.js",
+      "@photo-sphere-viewer/core": "./node_modules/@photo-sphere-viewer/core/index.module.js",
+      "@photo-sphere-viewer/gyroscope-plugin": "./node_modules/@photo-sphere-viewer/gyroscope-plugin/index.module.js"
+    }
+  }
+  </script>
 </head>
 <body>
-  <div id="viewer"></div>
-
-  <script type="importmap">
-    {
-      "imports": {
-        "@photo-sphere-viewer/core": "https://unpkg.com/@photo-sphere-viewer/core@5.14.3/dist/photo-sphere-viewer.module.js",
-        "@photo-sphere-viewer/gyroscope-plugin": "https://unpkg.com/@photo-sphere-viewer/gyroscope-plugin@5.14.3/dist/index.module.js"
-      }
-    }
-  </script>
+  <div id="viewer">Загрузка…</div>
 
   <script type="module">
     import { Viewer } from "@photo-sphere-viewer/core";
@@ -26,20 +28,17 @@
     const viewer = new Viewer({
       container: document.getElementById('viewer'),
       panorama: 'panorama_4096x2048.jpg',
+      navbar: ['zoom','fullscreen'],
       plugins: [GyroscopePlugin],
     });
 
     const gyro = viewer.getPlugin(GyroscopePlugin);
 
     document.body.addEventListener('click', async () => {
-      if (typeof DeviceMotionEvent?.requestPermission === 'function') {
-        try { await DeviceMotionEvent.requestPermission(); } catch {}
-      }
-      if (typeof DeviceOrientationEvent?.requestPermission === 'function') {
-        try { await DeviceOrientationEvent.requestPermission(); } catch {}
-      }
-      try { await gyro.start(); } catch(e) { console.error(e); }
-    }, {once:true});
+      if (typeof DeviceMotionEvent?.requestPermission === 'function') { try { await DeviceMotionEvent.requestPermission(); } catch {} }
+      if (typeof DeviceOrientationEvent?.requestPermission === 'function') { try { await DeviceOrientationEvent.requestPermission(); } catch {} }
+      try { await gyro.start(); } catch(e){ console.log(e); }
+    }, { once:true });
   </script>
 </body>
 </html>
