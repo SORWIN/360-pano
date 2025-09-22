@@ -5,90 +5,69 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>360 панорама</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@photo-sphere-viewer/core@5.14.0/index.css">
-  <style>
-    html,body,#viewer{height:100%;margin:0;background:#111}
-    #ui{position:fixed;left:0;right:0;bottom:1rem;display:flex;gap:.5rem;justify-content:center}
-    button{padding:.6rem 1rem;border:0;border-radius:.6rem;font:600 14px system-ui,Arial}
-  </style>
+  <style>html,body,#viewer{height:100%;margin:0;background:#111}</style>
 
   <script type="importmap">
-  {
-    "imports": {
-      "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
-      "@photo-sphere-viewer/core": "https://cdn.jsdelivr.net/npm/@photo-sphere-viewer/core@5.14.0/index.module.js",
-      "@photo-sphere-viewer/gyroscope-plugin": "https://cdn.jsdelivr.net/npm/@photo-sphere-viewer/gyroscope-plugin@5.14.0/index.module.js"
-    }
-  }
+  {"imports":{
+    "three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
+    "@photo-sphere-viewer/core":"https://cdn.jsdelivr.net/npm/@photo-sphere-viewer/core@5.14.0/index.module.js",
+    "@photo-sphere-viewer/gyroscope-plugin":"https://cdn.jsdelivr.net/npm/@photo-sphere-viewer/gyroscope-plugin@5.14.0/index.module.js"
+  }}
   </script>
 </head>
 <body>
   <div id="viewer"></div>
-  <div id="ui">
-    <button id="gyroBtn">…</button>
-  </div>
 
   <script type="module">
     import { Viewer } from "@photo-sphere-viewer/core";
     import { GyroscopePlugin } from "@photo-sphere-viewer/gyroscope-plugin";
 
-    const viewer = new Viewer({
-      container: document.getElementById('viewer'),
-      panorama: 'panorama_4096x2048.jpg',
-      navbar: ['zoom','fullscreen'], // fullscreen остаётся
-      plugins: [GyroscopePlugin],
-    });
-
-    const gyro = viewer.getPlugin(GyroscopePlugin);
-    const btn = document.getElementById('gyroBtn');
-
-    let gyroLikely = false;
     let gyroActive = false;
+    let gyroLikely = false;
 
-    // Проверка rotationRate (одноразово)
-    window.addEventListener('devicemotion', function detect(ev){
-      const rr = ev.rotationRate;
-      if (rr && (rr.alpha || rr.beta || rr.gamma)) {
-        gyroLikely = true;
-      }
+    // один раз слушаем devicemotion, чтобы понять есть ли реальный gyro
+    window.addEventListener('devicemotion', function detect(e){
+      const rr = e.rotationRate;
+      if (rr && (rr.alpha || rr.beta || rr.gamma)) gyroLikely = true;
       window.removeEventListener('devicemotion', detect);
-      initControl();
-    });
+      init();
+    }, { once:true });
 
-    function initControl() {
-      if (gyroLikely) {
-        // Считаем, что гироскоп есть → включаем по умолчанию
-        enableGyro();
-      } else {
-        // Имитированный гироскоп → по умолчанию тач
-        disableGyro();
-      }
-      btn.addEventListener('click', toggleGyro);
+    function navbarWith(label){
+      return [
+        'zoom',
+        { id:'gyro-toggle', title:label, className:'psv-navbar__button', content:label, onClick:toggleGyro },
+        'fullscreen'
+      ];
     }
 
-    async function enableGyro() {
-      if (typeof DeviceMotionEvent?.requestPermission === 'function') {
-        try { await DeviceMotionEvent.requestPermission(); } catch {}
-      }
-      if (typeof DeviceOrientationEvent?.requestPermission === 'function') {
-        try { await DeviceOrientationEvent.requestPermission(); } catch {}
-      }
-      try { await gyro.start(); } catch(e){ console.log(e); }
-      gyroActive = true;
-      btn.textContent = 'Гироскоп выкл.';
+    let viewer, gyro, gyroBtn;
+
+    async function init(){
+      viewer = new Viewer({
+        container: document.getElementById('viewer'),
+        panorama: 'panorama_4096x2048.jpg',
+        navbar: navbarWith(gyroLikely ? 'Гироскоп выкл.' : 'Гироскоп вкл.'),
+        plugins: [GyroscopePlugin],
+      });
+
+      gyro = viewer.getPlugin(GyroscopePlugin);
+      gyroBtn = viewer.navbar.getButton('gyro-toggle');
+
+      if (gyroLikely) enableGyro(); // у «настоящего» включаем по умолчанию
     }
 
-    function disableGyro() {
-      try { gyro.stop(); } catch(e){}
-      gyroActive = false;
-      btn.textContent = 'Гироскоп вкл.';
+    async function enableGyro(){
+      if (typeof DeviceMotionEvent?.requestPermission === 'function') { try{ await DeviceMotionEvent.requestPermission(); }catch{} }
+      if (typeof DeviceOrientationEvent?.requestPermission === 'function') { try{ await DeviceOrientationEvent.requestPermission(); }catch{} }
+      try { await gyro.start(); gyroActive = true; updateLabel(); } catch(e){ /* игнор */ }
     }
-
-    function toggleGyro() {
-      if (gyroActive) {
-        disableGyro();
-      } else {
-        enableGyro();
-      }
+    function disableGyro(){ try{ gyro.stop(); }catch{} gyroActive = false; updateLabel(); }
+    function toggleGyro(){ gyroActive ? disableGyro() : enableGyro(); }
+    function updateLabel(){
+      const label = gyroActive ? 'Гироскоп выкл.' : 'Гироскоп вкл.';
+      gyroBtn.button.title = label;              // tooltip
+      gyroBtn.button.innerText = label;          // текст в полоске
     }
   </script>
 </body>
